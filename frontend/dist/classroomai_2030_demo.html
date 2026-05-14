@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClassroomAI 2030 - Modern UI Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #00d4ff;
+            --secondary: #6366f1;
+            --accent: #ec4899;
+            --dark: #0f172a;
+            --darker: #020617;
+            --light: #f8fafc;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--darker) 0%, var(--dark) 100%);
+            color: var(--light);
+            min-height: 100vh;
+        }
+
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 250px;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid rgba(0, 212, 255, 0.1);
+            padding: 2rem 0;
+            overflow-y: auto;
+        }
+
+        .sidebar-logo {
+            padding: 0 1.5rem 2rem;
+            font-size: 1.3rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .sidebar-menu {
+            list-style: none;
+        }
+
+        .sidebar-menu li {
+            margin: 0.5rem 0;
+            padding: 0 1rem;
+        }
+
+        .sidebar-menu a {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            color: rgba(248, 250, 252, 0.7);
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .sidebar-menu a:hover,
+        .sidebar-menu a.active {
+            background: rgba(0, 212, 255, 0.1);
+            color: var(--primary);
+            border-left: 3px solid var(--primary);
+            padding-left: calc(1rem - 3px);
+        }
+
+        /* Header */
+        .header {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-right {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.7rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .page-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem;
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 16px;
+            padding: 2rem;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(0, 212, 255, 0.5);
+            background: rgba(30, 41, 59, 0.7);
+            transform: translateY(-5px);
+        }
+
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-icon {
+            font-size: 1.5rem;
+        }
+
+        /* Stats Section */
+        .stats-box {
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.8rem 0;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+        }
+
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            height: 8px;
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            width: 65%;
+        }
+
+        /* Topic Tags */
+        .topics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.7rem;
+            margin-top: 1rem;
+        }
+
+        .topic-tag {
+            background: rgba(99, 102, 241, 0.2);
+            border: 1px solid var(--secondary);
+            color: var(--light);
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+        }
+
+        .topic-tag:hover {
+            background: rgba(99, 102, 241, 0.4);
+            transform: scale(1.05);
+        }
+
+        /* Recent Items */
+        .recent-item {
+            padding: 1rem;
+            background: rgba(0, 212, 255, 0.05);
+            border-radius: 8px;
+            border-left: 3px solid var(--primary);
+            margin-bottom: 0.8rem;
+            transition: all 0.3s ease;
+        }
+
+        .recent-item:hover {
+            background: rgba(0, 212, 255, 0.1);
+            transform: translateX(5px);
+        }
+
+        .recent-title {
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+        }
+
+        .recent-time {
+            font-size: 0.85rem;
+            color: rgba(248, 250, 252, 0.5);
+        }
+
+        /* Usage Counter */
+        .usage-section {
+            margin-top: 1.5rem;
+        }
+
+        .usage-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .usage-bar {
+            height: 12px;
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .usage-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            width: 42%;
+        }
+
+        /* Grid Full Width */
+        .card-full {
+            grid-column: 1 / -1;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar {
+                width: 200px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                padding: 1rem 0;
+            }
+
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .page-body {
+                padding: 1rem;
+            }
+        }
+
+        /* Animation */
+        @keyframes glow {
+            0%, 100% { text-shadow: 0 0 10px rgba(0, 212, 255, 0.5); }
+            50% { text-shadow: 0 0 20px rgba(0, 212, 255, 1); }
+        }
+
+        .glow-text {
+            animation: glow 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-logo glow-text">🎓 ClassroomAI</div>
+            <ul class="sidebar-menu">
+                <li><a class="active">📊 Dashboard</a></li>
+                <li><a>⚡ Auto Generator</a></li>
+                <li><a>📝 Worksheet</a></li>
+                <li><a>📚 Lesson Plan</a></li>
+                <li><a>❓ MC Assessment</a></li>
+            </ul>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <h1>Dashboard</h1>
+                <div class="header-right">
+                    <button class="btn btn-primary">Sign In</button>
+                </div>
+            </div>
+
+            <!-- Page Body -->
+            <div class="page-body">
+                <!-- Dashboard Grid -->
+                <div class="dashboard-grid">
+                    <!-- Stats Card -->
+                    <div class="card">
+                        <div class="card-title">
+                            <span class="card-icon">📈</span>
+                            Overview
+                        </div>
+                        <div class="stats-box">
+                            <div class="stat-item">
+                                <span>Total Generated</span>
+                                <span class="stat-value">24</span>
+                            </div>
+                            <div class="stat-item">
+                                <span>This Month</span>
+                                <span class="stat-value">12</span>
+                            </div>
+                            <div class="stat-item">
+                                <span>This Week</span>
+                                <span class="stat-value">5</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Usage Card -->
+                    <div class="card">
+                        <div class="card-title">
+                            <span class="card-icon">⚙️</span>
+                            Monthly Usage
+                        </div>
+                        <div class="stats-box">
+                            <div class="usage-section">
+                                <div class="usage-label">
+                                    <span>Worksheet Generator</span>
+                                    <span>21/50</span>
+                                </div>
+                                <div class="usage-bar">
+                                    <div class="usage-fill" style="width: 42%;"></div>
+                                </div>
+                            </div>
+                            <div class="usage-section">
+                                <div class="usage-label">
+                                    <span>Lesson Plan Generator</span>
+                                    <span>8/50</span>
+                                </div>
+                                <div class="usage-bar">
+                                    <div class="usage-fill" style="width: 16%;"></div>
+                                </div>
+                            </div>
+                            <div class="usage-section">
+                                <div class="usage-label">
+                                    <span>MC Assessment</span>
+                                    <span>15/50</span>
+                                </div>
+                                <div class="usage-bar">
+                                    <div class="usage-fill" style="width: 30%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Latest Topics -->
+                    <div class="card">
+                        <div class="card-title">
+                            <span class="card-icon">🏷️</span>
+                            Topics Used
+                        </div>
+                        <div class="topics">
+                            <div class="topic-tag">Photosynthesis</div>
+                            <div class="topic-tag">Fractions</div>
+                            <div class="topic-tag">History</div>
+                            <div class="topic-tag">Biology</div>
+                        </div>
+                        <div class="progress-bar" style="margin-top: 1.5rem;">
+                            <div class="progress-fill" style="width: 65%;"></div>
+                        </div>
+                        <p style="margin-top: 0.5rem; color: rgba(248, 250, 252, 0.6); font-size: 0.85rem;">Knowledge base coverage: 65%</p>
+                    </div>
+
+                    <!-- Recent Generations (Full Width) -->
+                    <div class="card card-full">
+                        <div class="card-title">
+                            <span class="card-icon">📖</span>
+                            Recent Generations
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                            <div class="recent-item">
+                                <div class="recent-title">🧪 Photosynthesis Quiz</div>
+                                <div class="recent-time">Generated: Today at 2:30 PM</div>
+                                <div style="margin-top: 0.5rem; color: rgba(248, 250, 252, 0.6);">Tool: MC Assessment Generator</div>
+                            </div>
+                            <div class="recent-item">
+                                <div class="recent-title">📊 Fractions & Decimals Worksheet</div>
+                                <div class="recent-time">Generated: Today at 1:15 PM</div>
+                                <div style="margin-top: 0.5rem; color: rgba(248, 250, 252, 0.6);">Tool: Worksheet Generator</div>
+                            </div>
+                            <div class="recent-item">
+                                <div class="recent-title">📚 American History Lesson</div>
+                                <div class="recent-time">Generated: Yesterday at 4:45 PM</div>
+                                <div style="margin-top: 0.5rem; color: rgba(248, 250, 252, 0.6);">Tool: Lesson Plan Generator</div>
+                            </div>
+                            <div class="recent-item">
+                                <div class="recent-title">⚡ Chemistry Lab Setup</div>
+                                <div class="recent-time">Generated: Yesterday at 3:20 PM</div>
+                                <div style="margin-top: 0.5rem; color: rgba(248, 250, 252, 0.6);">Tool: Auto Generator</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Features Card (Full Width) -->
+                    <div class="card card-full">
+                        <div class="card-title">
+                            <span class="card-icon">✨</span>
+                            Available Tools
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-top: 1rem;">
+                            <button class="btn btn-primary" style="width: 100%;">📝 Worksheet</button>
+                            <button class="btn btn-primary" style="width: 100%;">📚 Lesson Plan</button>
+                            <button class="btn btn-primary" style="width: 100%;">❓ MC Assessment</button>
+                            <button class="btn btn-primary" style="width: 100%;">⚡ Auto Generate</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

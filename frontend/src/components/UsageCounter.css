@@ -1,0 +1,127 @@
+.usage-counter {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  transition: all 0.3s ease;
+}
+
+.usage-counter.normal {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.usage-counter.warning {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: #f59e0b;
+}
+
+.usage-counter.exceeded {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+}
+
+.usage-counter.loading {
+  color: var(--text-2);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  background: var(--bg);
+  border-color: var(--border);
+  transition: color 0.3s ease, background 0.3s ease, border-color 0.3s ease;
+}
+
+.usage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.usage-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-1);
+  transition: color 0.3s ease;
+}
+
+.usage-number {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  transition: color 0.3s ease;
+}
+
+.usage-counter.warning .usage-number {
+  color: #f59e0b;
+}
+
+.usage-counter.exceeded .usage-number {
+  color: #ef4444;
+}
+
+.usage-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  transition: background 0.3s ease;
+}
+
+.usage-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-dark) 100%);
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.usage-counter.warning .usage-fill {
+  background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+}
+
+.usage-counter.exceeded .usage-fill {
+  background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+  width: 100% !important;
+}
+
+.usage-warning {
+  font-size: 13px;
+  color: #dc2626;
+  font-weight: 600;
+  padding: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  text-align: center;
+  animation: slideDown 0.3s ease;
+}
+
+.usage-hint {
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: center;
+  transition: color 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .usage-counter {
+    padding: 12px;
+  }
+
+  .usage-number {
+    font-size: 14px;
+  }
+}

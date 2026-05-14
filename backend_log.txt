@@ -1,0 +1,111 @@
+﻿python : INFO:     Started server process [10952]
+At line:1 char:82
++ ... idhya\teacher\classroom-ai-main\backend'; python main.py 2>&1 | Out-F ...
++                                               ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO:     Started server process [10952]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+[DEBUG] main.py loading...
+[DEBUG] All imports complete
+[DEBUG] Creating FastAPI app...
+[STARTUP] Loading chat history & usage endpoints...
+INFO:     127.0.0.1:53169 - "POST /api/auth/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60451 - "POST /api/auth/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59187 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59189 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60066 - "OPTIONS /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60066 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60066 - "OPTIONS /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60066 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57726 - "OPTIONS /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57726 - "OPTIONS /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57726 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57726 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55743 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52800 - "OPTIONS /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55743 - "OPTIONS /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52800 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55743 - "OPTIONS /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52800 - "OPTIONS /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55743 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52800 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55743 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57724 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52239 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60663 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60945 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60663 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52239 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60945 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53317 - "OPTIONS /api/auth/logout HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53317 - "POST /api/auth/logout HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55415 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55415 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61485 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61485 - "POST /api/auth/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61485 - "OPTIONS /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61485 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62437 - "OPTIONS /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61082 - "OPTIONS /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53191 - "OPTIONS /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50258 - "OPTIONS /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51770 - "OPTIONS /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64405 - "OPTIONS /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50258 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51770 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61082 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53191 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64405 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62437 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62437 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64405 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52314 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59623 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59623 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52314 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52314 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59623 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59623 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52314 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56921 - "OPTIONS /api/increment-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56921 - "POST /api/increment-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56921 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56921 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56921 - "OPTIONS /api/lesson-plan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56921 - "POST /api/lesson-plan HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56921 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53083 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64657 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49680 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53983 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64867 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59944 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52977 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55222 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56112 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59507 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "OPTIONS /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51138 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51138 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59728 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58674 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56822 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/check-usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/adaptive/student-progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61544 - "POST /api/adaptive/recommend-next HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60311 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60311 - "GET /api/auth/me HTTP/1.1" 200 OK
