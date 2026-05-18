@@ -1,134 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useMemo } from 'react'
 import OutputBox from '../components/OutputBox'
 import CustomSelect from '../components/CustomSelect'
 import ChatHistory from '../components/ChatHistory'
 import UsageCounter from '../components/UsageCounter'
 import ErrorToast from '../components/ErrorToast'
 import { useAuth } from '../context/AuthContext'
+import {
+  GRADES, getCoreSubjects, getMiscSubjects, getCoreTopics, getMiscTopics,
+  findTopicDescription,
+} from '../data/cbseSubjects'
 
 const API = window.location.hostname === 'localhost' ? 'http://localhost:8001' : window.location.origin
 const STORAGE_KEY = 'classroom-result-lesson'
 
-const grades    = ['Kindergarten','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5','Grade 6','Grade 7','Grade 8','Grade 9','Grade 10','Grade 11','Grade 12','College']
-
-const subjects  = ['Mathematics','Science','English Language Arts','Social Studies','History','Geography','Physics','Chemistry','Biology','Computer Science','Art','Music','Physical Education','Foreign Language','Other']
 const durations = ['20 minutes','30 minutes','45 minutes','50 minutes','60 minutes','75 minutes','90 minutes','2 hours','Block Schedule (90 min)']
-
-const TOPIC_SUGGESTIONS = {
-  'Mathematics': {
-    'Kindergarten': ['Counting 1–10','Basic Shapes','More & Less'],
-    'Grade 1': ['Addition & Subtraction','Number Patterns','Measurement'],
-    'Grade 2': ['Place Value','2-Digit Addition','Basic Fractions'],
-    'Grade 3': ['Multiplication Tables','Division Basics','Fractions'],
-    'Grade 4': ['Long Multiplication','Decimals','Area & Perimeter'],
-    'Grade 5': ['Fractions & Decimals','Order of Operations','Geometry Basics'],
-    'Grade 6': ['Ratios & Proportions','Integers','Algebraic Expressions'],
-    'Grade 7': ['Linear Equations','Percentages','Statistics'],
-    'Grade 8': ['Algebra','Pythagorean Theorem','Functions'],
-    'Grade 9': ['Quadratic Equations','Polynomials','Graphing Lines'],
-    'Grade 10': ['Trigonometry','Probability','Sequences & Series','Matrices Intro','Logarithms','Coordinate Geometry','Statistics','Permutations & Combinations','Financial Mathematics','Circle Theorems'],
-    'Grade 11': ['Calculus Intro','Logarithms','Matrices'],
-    'Grade 12': ['Calculus','Advanced Statistics','Complex Numbers'],
-    'College':  ['Linear Algebra','Multivariable Calculus','Differential Equations'],
-  },
-  'Science': {
-    'Kindergarten': ['Living & Non-living Things','Weather','Plants Around Us'],
-    'Grade 1': ['Animal Habitats','Seasons','The Five Senses'],
-    'Grade 2': ['Life Cycles','Solids & Liquids','Earth Materials'],
-    'Grade 3': ['Food Chains','Magnetism','Weather Patterns'],
-    'Grade 4': ['Ecosystems','Electricity','Rocks & Minerals'],
-    'Grade 5': ['Photosynthesis','The Solar System','Matter & Energy'],
-    'Grade 6': ['Cell Structure','Earth\'s Layers','Force & Motion'],
-    'Grade 7': ['Human Body Systems','Chemical Reactions','Ecosystems'],
-    'Grade 8': ['Genetics Basics','Waves & Sound','Newton\'s Laws'],
-    'Grade 9': ['Atomic Structure','Natural Selection','Types of Energy'],
-    'Grade 10': ['Periodic Table','Photosynthesis & Respiration','Plate Tectonics','Chemical Bonding','Acids & Bases','Human Body Systems','Genetics','Ecology & Environment','Newton\'s Laws','Wave Properties'],
-    'Grade 11': ['Organic Chemistry','Genetics & DNA','Thermodynamics'],
-    'Grade 12': ['Quantum Physics','Biotechnology','Environmental Science'],
-    'College':  ['Molecular Biology','Astrophysics','Biochemistry'],
-  },
-  'English Language Arts': {
-    'Kindergarten': ['Alphabet & Phonics','Sight Words','Story Sequencing'],
-    'Grade 1': ['Short Vowels','Reading Comprehension','Sentence Writing'],
-    'Grade 2': ['Nouns & Verbs','Main Idea & Details','Story Elements'],
-    'Grade 3': ['Adjectives & Adverbs','Paragraph Writing','Point of View'],
-    'Grade 4': ['Figurative Language','Essay Structure','Summarizing Texts'],
-    'Grade 5': ['Theme & Plot','Persuasive Writing','Vocabulary in Context'],
-    'Grade 6': ['Literary Devices','Argumentative Writing','Text Structure'],
-    'Grade 7': ['Character Analysis','Narrative Writing','Making Inferences'],
-    'Grade 8': ['Using Textual Evidence','Research Writing','Rhetorical Devices'],
-    'Grade 9': ['Literary Analysis','Expository Writing','Introduction to Shakespeare'],
-    'Grade 10': ['Poetry Analysis','Comparative Essays','Rhetoric & Persuasion'],
-    'Grade 11': ['American Literature','Synthesis Writing','AP Style Essays'],
-    'Grade 12': ['World Literature','College Essay Writing','Critical Analysis'],
-    'College':  ['Academic Research Writing','Literary Theory','Advanced Composition'],
-  },
-  'History': {
-    'Grade 3': ['Community History','Native Americans','Colonial Life'],
-    'Grade 4': ['State History','American Revolution','Westward Expansion'],
-    'Grade 5': ['Civil War','US Constitution','Industrial Revolution'],
-    'Grade 6': ['Ancient Egypt','Ancient Greece','Ancient Rome'],
-    'Grade 7': ['Middle Ages','The Renaissance','Age of Exploration'],
-    'Grade 8': ['American Revolution','Civil War & Reconstruction','Immigration'],
-    'Grade 9': ['World War I','Russian Revolution','The Great Depression'],
-    'Grade 10': ['World War II','The Cold War','Decolonization Movements'],
-    'Grade 11': ['US History Overview','Vietnam War','Civil Rights Movement'],
-    'Grade 12': ['Modern World History','Genocide Studies','Global Conflicts'],
-    'College':  ['Historiography','Global Economic History','Colonialism & Its Legacy'],
-  },
-  'Geography': {
-    'Grade 3': ['Maps & Globes','Continents & Oceans','My Community'],
-    'Grade 4': ['US Regions','Climate Zones','Natural Resources'],
-    'Grade 5': ['World Regions','Human & Physical Geography','Migration'],
-    'Grade 6': ['Latitude & Longitude','Biomes','World Population'],
-    'Grade 7': ['World Cultures','Rivers & Mountains','Trade Routes'],
-    'Grade 8': ['US Geography','Economic Geography','Political Maps'],
-    'Grade 9': ['Physical Geography','Urbanization','Environmental Issues'],
-    'Grade 10': ['Human Geography','Globalization','Cultural Landscapes'],
-    'Grade 11': ['AP Human Geography','Development Patterns','Geopolitics'],
-    'Grade 12': ['Economic Geography','Environmental Policy','World Systems'],
-  },
-  'Biology': {
-    'Grade 6': ['Cell Structure','Ecosystems','Plant Biology'],
-    'Grade 7': ['Human Body Systems','Genetics Intro','Microbiology'],
-    'Grade 8': ['Evolution','DNA & Heredity','Ecology'],
-    'Grade 9': ['Cell Division','Natural Selection','Biomes'],
-    'Grade 10': ['Photosynthesis & Respiration','Genetics','Classification of Life'],
-    'Grade 11': ['Molecular Biology','Animal Behavior','Human Physiology'],
-    'Grade 12': ['Biotechnology','Advanced Genetics','Environmental Biology'],
-    'College':  ['Cell Signaling','Population Genetics','Developmental Biology'],
-  },
-  'Chemistry': {
-    'Grade 9': ['Atomic Structure','Periodic Table','Chemical Bonding'],
-    'Grade 10': ['Chemical Reactions','Acids & Bases','Stoichiometry'],
-    'Grade 11': ['Organic Chemistry','Equilibrium','Thermochemistry'],
-    'Grade 12': ['Electrochemistry','Nuclear Chemistry','Advanced Organic Compounds'],
-    'College':  ['Quantum Chemistry','Spectroscopy','Advanced Thermodynamics'],
-  },
-  'Physics': {
-    'Grade 9': ['Motion & Speed','Newton\'s Laws','Energy Types'],
-    'Grade 10': ['Waves & Sound','Electricity Basics','Magnetism'],
-    'Grade 11': ['Thermodynamics','Optics','Circular Motion'],
-    'Grade 12': ['Quantum Mechanics','Relativity','Nuclear Physics'],
-    'College':  ['Classical Mechanics','Electromagnetism','Statistical Physics'],
-  },
-  'Computer Science': {
-    'Grade 3': ['Basic Computer Parts','Introduction to Coding','Internet Safety'],
-    'Grade 5': ['Scratch Programming','Algorithms','Binary Numbers'],
-    'Grade 7': ['Python Basics','Web Design','Data & Databases'],
-    'Grade 9': ['Programming Logic','Data Structures','Cybersecurity'],
-    'Grade 11': ['Object-Oriented Programming','AI & Machine Learning','Software Design'],
-    'Grade 12': ['Advanced Algorithms','Computer Networks','App Development'],
-    'College':  ['Operating Systems','Compiler Design','Distributed Systems'],
-  },
-  'default': ['Introduction to the Topic','Key Concepts & Vocabulary','Hands-on Activity','Review & Assessment','Real-World Applications'],
-}
-
-function getTopicSuggestions(subject, grade) {
-  const subjectMap = TOPIC_SUGGESTIONS[subject]
-  if (!subjectMap) return TOPIC_SUGGESTIONS['default']
-  return subjectMap[grade] || TOPIC_SUGGESTIONS['default']
-}
 
 function VoiceMic({ onResult, disabled, accentColor = '#399aff', softBg = '#eff6ff', midBorder = '#bfdbfe' }) {
   const [listening, setListening] = useState(false)
@@ -179,17 +64,91 @@ const FORM_BODY = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 24px 2
 
 const ErrMsg = ({ msg }) => msg ? <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: 4, fontWeight: 500 }}>⚠ {msg}</div> : null
 
+// ── Track tabs (Core / Miscellaneous) ─────────────────
+function TrackTabs({ value, onChange, coreCount, miscCount, disabled }) {
+  const tabs = [
+    { key: 'core', label: 'Core (CBSE/NCERT)', count: coreCount, color: '#10b981', bg: '#ecfdf5', border: '#bbf7d0' },
+    { key: 'misc', label: 'Miscellaneous',     count: miscCount, color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
+  ]
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 6, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+      {tabs.map(t => {
+        const active = value === t.key
+        return (
+          <button key={t.key} type="button" onClick={() => onChange(t.key)} style={{
+            flex: 1, padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
+            fontSize: '0.78rem', fontWeight: 600, fontFamily: 'var(--font)',
+            border: active ? `1.5px solid ${t.color}` : '1.5px solid var(--border)',
+            background: active ? t.bg : 'var(--surface)',
+            color: active ? t.color : 'var(--text-2)',
+            transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}>
+            {t.label}
+            <span style={{
+              fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+              background: active ? t.color : '#e5e7eb', color: active ? '#fff' : 'var(--text-2)',
+            }}>{t.count}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Post-result enrichment banner ─────────────────────
+function EnrichBanner({ onAction, busy }) {
+  const actions = [
+    { key: 'more_activities', label: 'Add more activities',       icon: '🎯', desc: 'Generate 4–5 new in-class activities' },
+    { key: 'more_examples',   label: 'Add more example questions', icon: '✍️', desc: 'NCERT-style worked examples with solutions' },
+    { key: 'more_topics',     label: 'Add more subtopics',        icon: '📚', desc: 'Related topics & deeper subtopics' },
+  ]
+  return (
+    <div style={{
+      marginTop: 16, padding: 14,
+      background: 'linear-gradient(135deg, #eff6ff, #f0fdf4)',
+      border: '1.5px solid #bfdbfe', borderRadius: 12,
+    }}>
+      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-1)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        ✨ Enrich this lesson plan
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+        {actions.map(a => (
+          <button key={a.key} type="button" disabled={busy === a.key} onClick={() => onAction(a.key)} style={{
+            padding: '10px 12px', borderRadius: 10, cursor: busy ? 'wait' : 'pointer',
+            border: '1.5px solid #bfdbfe', background: 'var(--surface)',
+            textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+            opacity: busy && busy !== a.key ? 0.5 : 1,
+            transition: 'all 0.15s', fontFamily: 'var(--font)',
+          }}
+          onMouseEnter={e => { if (!busy) { e.currentTarget.style.borderColor = '#399aff'; e.currentTarget.style.background = '#eff6ff' } }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = '#bfdbfe'; e.currentTarget.style.background = 'var(--surface)' }}
+          >
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>{a.icon}</span>
+              {busy === a.key ? 'Generating…' : a.label}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{a.desc}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function LessonPlanGenerator() {
   const { teacherId: TEACHER_ID } = useAuth()
-  const STUDENT_ID = 'student-' + (Math.random().toString(36).substring(7))
   const [form, setForm] = useState({
-    topic: '', grade_level: '', subject: '',
+    grade_level: '', subject: '', topic: '',
     duration: '45 minutes', objectives: '', standards: '',
     include_topic_overview: true,
-    additional_notes: ''
+    additional_notes: '',
   })
+  const [subjectTrack, setSubjectTrack] = useState('core')
+  const [topicTrack, setTopicTrack]     = useState('core')
+  const [customTopic, setCustomTopic]   = useState('')
   const [result, setResult]   = useState(() => localStorage.getItem(STORAGE_KEY) || '')
   const [loading, setLoading] = useState(false)
+  const [enrichBusy, setEnrichBusy] = useState('')
   const [errors, setErrors]   = useState({})
   const [showHistory, setShowHistory] = useState(false)
   const [limitError, setLimitError] = useState('')
@@ -217,11 +176,60 @@ export default function LessonPlanGenerator() {
   const saveResult  = (val) => { setResult(val); localStorage.setItem(STORAGE_KEY, val) }
   const clearResult = ()    => { setResult(''); localStorage.removeItem(STORAGE_KEY) }
 
+  // Derived option lists.
+  const coreSubjects = useMemo(() => getCoreSubjects(form.grade_level), [form.grade_level])
+  const miscSubjects = useMemo(() => getMiscSubjects(form.grade_level), [form.grade_level])
+  const coreTopics   = useMemo(() => getCoreTopics(form.grade_level, form.subject), [form.grade_level, form.subject])
+  const miscTopics   = useMemo(() => getMiscTopics(form.grade_level, form.subject), [form.grade_level, form.subject])
+
+  const subjectOptions = subjectTrack === 'core' ? coreSubjects : miscSubjects
+  const topicOptions   = topicTrack   === 'core' ? coreTopics   : miscTopics
+
+  const subjectLocked = !form.grade_level
+  const topicLocked   = !form.subject
+
+  // Reset dependent fields when parents change.
+  const onGradeChange = (val) => {
+    setForm(f => ({ ...f, grade_level: val, subject: '', topic: '' }))
+    setSubjectTrack('core'); setTopicTrack('core'); setCustomTopic('')
+    setErrors({})
+  }
+  const onSubjectTrackChange = (t) => {
+    setSubjectTrack(t)
+    setForm(f => ({ ...f, subject: '', topic: '' }))
+    setTopicTrack('core'); setCustomTopic('')
+  }
+  const onSubjectChange = (val) => {
+    setForm(f => ({ ...f, subject: val, topic: '' }))
+    // When picking a Miscellaneous subject, the CBSE topic list won't exist — default topic tab to Miscellaneous.
+    if (subjectTrack === 'misc') setTopicTrack('misc')
+    else setTopicTrack('core')
+    setCustomTopic('')
+  }
+  const onTopicTrackChange = (t) => {
+    setTopicTrack(t); setForm(f => ({ ...f, topic: '' })); setCustomTopic('')
+  }
+
+  // Build the description/topic_track that will be sent to the backend.
+  const buildTopicMeta = () => {
+    const effectiveTopic = (form.topic && form.topic.trim()) || customTopic.trim()
+    if (!effectiveTopic) return { topic: '', description: '', track: topicTrack }
+    let description = ''
+    if (topicTrack === 'core') {
+      description = findTopicDescription(form.grade_level, form.subject, effectiveTopic) || ''
+    } else {
+      const m = miscTopics.find(t => t.label === effectiveTopic)
+      description = m?.description || ''
+    }
+    return { topic: effectiveTopic, description, track: topicTrack }
+  }
+
   const validate = () => {
     const e = {}
-    if (!form.subject)      e.subject     = 'Please select a subject.'
     if (!form.grade_level)  e.grade_level = 'Please select a grade level.'
-    if (!form.topic.trim()) e.topic       = 'Please enter or select a topic.'
+    if (!form.subject)      e.subject     = 'Please select a subject.'
+    const { topic } = buildTopicMeta()
+    if (!topic) e.topic = 'Please select or type a topic.'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -230,7 +238,8 @@ export default function LessonPlanGenerator() {
     if (!validate()) return
     setLoading(true); saveResult('')
 
-    // Check usage limit first
+    const { topic, description, track } = buildTopicMeta()
+
     try {
       const usageRes = await fetch(`${API}/api/increment-usage`, {
         method: 'POST',
@@ -238,56 +247,67 @@ export default function LessonPlanGenerator() {
         body: JSON.stringify({ teacher_id: TEACHER_ID, tool_name: 'lesson-plan' })
       })
       const usageData = await usageRes.json()
-
       if (usageData.exceeded) {
         setLimitError(usageData.error || 'Daily limit exceeded. Try again tomorrow.')
-        setLoading(false)
-        return
+        setLoading(false); return
       }
-    } catch (e) {
-      console.error('Usage check failed:', e)
-      // Continue anyway if usage check fails
-    }
+    } catch (e) { console.error('Usage check failed:', e) }
 
     try {
+      const payload = {
+        ...form,
+        topic,
+        topic_description: description,
+        topic_track: track,
+        source_material: sourceMaterial,
+      }
       const res  = await fetch(`${API}/api/lesson-plan`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, source_material: sourceMaterial }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Error')
       saveResult(data.result)
 
-      // Refresh usage counter immediately
-      if (usageCounterRef.current) {
-        usageCounterRef.current.refresh()
-      }
+      if (usageCounterRef.current) usageCounterRef.current.refresh()
 
-      // Save to chat history
       try {
         fetch(`${API}/api/save-chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            teacher_id: TEACHER_ID,
-            tool_name: 'lesson-plan',
-            topic: form.topic,
-            grade_level: form.grade_level,
-            subject: form.subject,
-            request_data: form,
+            teacher_id: TEACHER_ID, tool_name: 'lesson-plan',
+            topic, grade_level: form.grade_level, subject: form.subject,
+            request_data: payload,
             response_preview: data.result?.substring(0, 200),
-            response_content: data.result
+            response_content: data.result,
           })
         })
-      } catch (e) {
-        console.error('Chat save failed:', e)
-      }
+      } catch (e) { console.error('Chat save failed:', e) }
     } catch (e) { setErrors(prev => ({ ...prev, general: e.message })) }
     finally     { setLoading(false) }
   }
 
-  const topicLocked = !form.subject || !form.grade_level
-  const suggestions = topicLocked ? [] : getTopicSuggestions(form.subject, form.grade_level)
+  const enrich = async (action) => {
+    if (!result || enrichBusy) return
+    setEnrichBusy(action)
+    try {
+      const { topic, description } = buildTopicMeta()
+      const res = await fetch(`${API}/api/lesson-plan/enrich`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          existing_plan: result,
+          topic, grade_level: form.grade_level, subject: form.subject,
+          duration: form.duration, topic_description: description,
+          action,
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Error')
+      saveResult(result + '\n\n' + '='.repeat(50) + '\n\n' + data.result)
+    } catch (e) { alert('Could not enrich: ' + e.message) }
+    finally { setEnrichBusy('') }
+  }
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
@@ -309,199 +329,237 @@ export default function LessonPlanGenerator() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 40, height: 40, background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#399aff" strokeWidth="1.9" strokeLinecap="round">
-                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                Lesson Plan Generator
-                <UsageCounter ref={usageCounterRef} teacherId={TEACHER_ID} toolName="lesson-plan" />
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#399aff" strokeWidth="1.9" strokeLinecap="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                </svg>
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Subject → Grade → Topic → Generate</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  Lesson Plan Generator
+                  <UsageCounter ref={usageCounterRef} teacherId={TEACHER_ID} toolName="lesson-plan" />
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Grade → Subject → Topic → Generate</div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div style={FORM_BODY}>
-          <div style={{ height: 8 }}/>
+          <div style={FORM_BODY}>
+            <div style={{ height: 8 }}/>
 
-          {/* STEP 1 — Subject */}
-          <div className="form-group">
-            <label className="form-label">Subject <span style={{ color: '#ef4444' }}>*</span></label>
-            <select className="form-select" value={form.subject}
-              onChange={e => { set('subject', e.target.value); set('topic', '') }}
-              style={{ borderColor: errors.subject ? '#fca5a5' : '#bfdbfe' }}>
-              <option value="">— Select Subject —</option>
-              {subjects.map(s => <option key={s}>{s}</option>)}
-            </select>
-            <ErrMsg msg={errors.subject} />
-          </div>
+            {/* STEP 1 — Grade */}
+            <div className="form-group">
+              <label className="form-label">Grade Level <span style={{ color: '#ef4444' }}>*</span></label>
+              <CustomSelect value={form.grade_level} onChange={e => onGradeChange(e.target.value)}
+                style={{ borderColor: errors.grade_level ? '#fca5a5' : '#bfdbfe' }}>
+                <option value="">— Select Grade —</option>
+                {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+              </CustomSelect>
+              <ErrMsg msg={errors.grade_level} />
+            </div>
 
-          {/* STEP 2 — Grade */}
-          <div className="form-group">
-            <label className="form-label">Grade Level <span style={{ color: '#ef4444' }}>*</span></label>
-            <CustomSelect value={form.grade_level}
-              onChange={e => { set('grade_level', e.target.value); set('topic', '') }}
-              style={{ borderColor: errors.grade_level ? '#fca5a5' : '#bfdbfe' }}>
-              <option value="">— Select Grade —</option>
-              {grades.map(g => <option key={g}>{g}</option>)}
-            </CustomSelect>
-            <ErrMsg msg={errors.grade_level} />
-          </div>
+            {/* STEP 2 — Subject (Core/Misc tabs) */}
+            <div className="form-group">
+              <label className="form-label">
+                Subject <span style={{ color: '#ef4444' }}>*</span>
+                {subjectLocked && <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 500, marginLeft: 6 }}>(select a grade first)</span>}
+              </label>
+              <TrackTabs
+                value={subjectTrack}
+                onChange={onSubjectTrackChange}
+                coreCount={coreSubjects.length}
+                miscCount={miscSubjects.length}
+                disabled={subjectLocked}
+              />
+              <CustomSelect value={form.subject} onChange={e => onSubjectChange(e.target.value)}
+                style={{ borderColor: errors.subject ? '#fca5a5' : '#bfdbfe', opacity: subjectLocked ? 0.5 : 1 }}>
+                <option value="">{subjectLocked ? 'Pick grade first…' : (subjectTrack === 'core' ? '— Pick CBSE subject —' : '— Pick miscellaneous subject —')}</option>
+                {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
+              </CustomSelect>
+              {!subjectLocked && subjectTrack === 'core' && coreSubjects.length === 0 && (
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>No CBSE TOC entries for this grade — try the Miscellaneous tab.</div>
+              )}
+              <ErrMsg msg={errors.subject} />
+            </div>
 
-          {/* STEP 3 — Topic dropdown + custom textarea */}
-          <div className="form-group">
-            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Topic / Objective <span style={{ color: '#ef4444' }}>*</span></span>
-              <span style={{ fontSize: '0.68rem', color: '#399aff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-                Voice enabled
-              </span>
-            </label>
-
-            {/* Dropdown */}
-            <select
-              className="form-select"
-              value={suggestions.includes(form.topic) ? form.topic : ''}
-              onChange={e => set('topic', e.target.value)}
-              disabled={topicLocked}
-              style={{ borderColor: errors.topic ? '#fca5a5' : '#bfdbfe', opacity: topicLocked ? 0.5 : 1, marginBottom: 8 }}
-            >
-              <option value="">{topicLocked ? 'Select subject & grade first…' : '— Pick a topic —'}</option>
-              {suggestions.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-
-            {/* Custom textarea with voice */}
-            <div style={{ position: 'relative' }}>
-              <textarea className="form-textarea"
-                placeholder="Or type a custom topic…"
-                value={suggestions.includes(form.topic) ? '' : form.topic}
-                onChange={e => set('topic', e.target.value)}
-                onWheel={lockScroll}
+            {/* STEP 3 — Topic (Core/Misc tabs) */}
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Topic <span style={{ color: '#ef4444' }}>*</span></span>
+                <span style={{ fontSize: '0.68rem', color: '#399aff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                  Voice
+                </span>
+              </label>
+              <TrackTabs
+                value={topicTrack}
+                onChange={onTopicTrackChange}
+                coreCount={coreTopics.length}
+                miscCount={miscTopics.length}
                 disabled={topicLocked}
-                style={{ ...scrollStyle, minHeight: 60, maxHeight: 100, paddingRight: 46, resize: 'vertical',
-                  borderColor: errors.topic ? '#fca5a5' : '#bfdbfe', opacity: topicLocked ? 0.5 : 1 }}/>
-              <VoiceMic onResult={v => set('topic', v)}
-                disabled={topicLocked} accentColor="#399aff" softBg="#eff6ff" midBorder="#bfdbfe"/>
+              />
+              <CustomSelect value={topicOptions.some(t => t.label === form.topic) ? form.topic : ''}
+                onChange={e => { set('topic', e.target.value); setCustomTopic('') }}
+                style={{ borderColor: errors.topic ? '#fca5a5' : '#bfdbfe', opacity: topicLocked ? 0.5 : 1 }}>
+                <option value="">
+                  {topicLocked ? 'Pick subject first…' :
+                    (topicTrack === 'core'
+                      ? (coreTopics.length === 0 ? 'No CBSE chapters for this subject' : '— Pick NCERT chapter / topic —')
+                      : '— Pick miscellaneous topic —')}
+                </option>
+                {topicOptions.map(t => <option key={t.label} value={t.label}>{t.chapter ? `${t.chapter} — ${t.label}` : t.label}</option>)}
+              </CustomSelect>
+
+              {/* Topic description preview */}
+              {!topicLocked && (() => {
+                const sel = topicOptions.find(t => t.label === form.topic)
+                if (sel && sel.description) {
+                  return (
+                    <div style={{ marginTop: 8, padding: '8px 10px', background: topicTrack === 'core' ? '#ecfdf5' : '#fffbeb',
+                      border: `1px solid ${topicTrack === 'core' ? '#bbf7d0' : '#fcd34d'}`, borderRadius: 8,
+                      fontSize: '0.72rem', color: 'var(--text-2)', lineHeight: 1.5 }}>
+                      <strong style={{ color: topicTrack === 'core' ? '#047857' : '#b45309' }}>
+                        {topicTrack === 'core' ? '📘 NCERT scope:' : '✨ Topic scope:'}
+                      </strong> {sel.description}
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              {/* Custom topic textarea */}
+              <div style={{ position: 'relative', marginTop: 8 }}>
+                <textarea className="form-textarea"
+                  placeholder={topicLocked ? '' : 'Or type a custom topic…'}
+                  value={topicOptions.some(t => t.label === form.topic) ? '' : (customTopic || form.topic)}
+                  onChange={e => { setCustomTopic(e.target.value); set('topic', '') }}
+                  onWheel={lockScroll}
+                  disabled={topicLocked}
+                  style={{ ...scrollStyle, minHeight: 56, maxHeight: 90, paddingRight: 46, resize: 'vertical',
+                    borderColor: errors.topic ? '#fca5a5' : '#bfdbfe', opacity: topicLocked ? 0.5 : 1 }}/>
+                <VoiceMic onResult={v => { setCustomTopic(v); set('topic', '') }}
+                  disabled={topicLocked} accentColor="#399aff" softBg="#eff6ff" midBorder="#bfdbfe"/>
+              </div>
+              <ErrMsg msg={errors.topic} />
             </div>
-            <ErrMsg msg={errors.topic} />
-          </div>
 
-          {/* Duration */}
-          <div className="form-group">
-            <label className="form-label">Class Duration</label>
-            <select className="form-select" value={form.duration} onChange={e => set('duration', e.target.value)}
-              style={{ borderColor: '#bfdbfe' }}>
-              {durations.map(d => <option key={d}>{d}</option>)}
-            </select>
-          </div>
+            {/* Duration */}
+            <div className="form-group">
+              <label className="form-label">Class Duration</label>
+              <select className="form-select" value={form.duration} onChange={e => set('duration', e.target.value)}
+                style={{ borderColor: '#bfdbfe' }}>
+                {durations.map(d => <option key={d}>{d}</option>)}
+              </select>
+            </div>
 
-          {/* Learning Objectives */}
-          <div className="form-group">
-            <label className="form-label">Learning Objectives (optional)</label>
-            <textarea className="form-textarea"
-              placeholder="e.g. Students will be able to explain the process of photosynthesis…"
-              value={form.objectives} onChange={e => set('objectives', e.target.value)}
-              onWheel={lockScroll}
-              style={{ ...scrollStyle, minHeight: 60, maxHeight: 100, resize: 'vertical', borderColor: '#bfdbfe' }}/>
-          </div>
+            {/* Learning Objectives */}
+            <div className="form-group">
+              <label className="form-label">Learning Objectives (optional)</label>
+              <textarea className="form-textarea"
+                placeholder="e.g. Students will be able to explain the process of photosynthesis…"
+                value={form.objectives} onChange={e => set('objectives', e.target.value)}
+                onWheel={lockScroll}
+                style={{ ...scrollStyle, minHeight: 60, maxHeight: 100, resize: 'vertical', borderColor: '#bfdbfe' }}/>
+            </div>
 
-          {/* Standards */}
-          <div className="form-group">
-            <label className="form-label">Standards / Curriculum (optional)</label>
-            <input className="form-input" placeholder="e.g. CCSS.ELA-LITERACY.RL.5.1, NGSS HS-LS1-5…"
-              value={form.standards} onChange={e => set('standards', e.target.value)}
-              style={{ borderColor: '#bfdbfe' }}/>
-          </div>
+            {/* Standards */}
+            <div className="form-group">
+              <label className="form-label">Standards / Curriculum (optional)</label>
+              <input className="form-input" placeholder="e.g. NCERT Class 10 — Real Numbers, NCF 2023…"
+                value={form.standards} onChange={e => set('standards', e.target.value)}
+                style={{ borderColor: '#bfdbfe' }}/>
+            </div>
 
-          {/* Include Topic Overview */}
-          <div className="form-group">
-            <label className="form-label">Output</label>
-            <button type="button" onClick={() => set('include_topic_overview', !form.include_topic_overview)} style={{
-              width: '100%', padding: '9px 14px', borderRadius: 10, fontFamily: 'var(--font)',
-              border: form.include_topic_overview ? '2px solid var(--accent)' : '1.5px solid var(--border)',
-              background: form.include_topic_overview ? 'var(--accent-soft)' : 'var(--surface)',
-              color: form.include_topic_overview ? 'var(--accent)' : 'var(--text-2)',
-              fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-              transition: 'all 0.18s', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <span style={{ width: 18, height: 18, borderRadius: 5,
-                border: form.include_topic_overview ? '2px solid #399aff' : '1.5px solid #ccc',
-                background: form.include_topic_overview ? '#399aff' : '#fff',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {form.include_topic_overview && <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"><polyline points="2 6 5 9 10 3"/></svg>}
-              </span>
-              Include Topic Overview page
-            </button>
-          </div>
-
-          {/* Additional Notes */}
-          <div className="form-group">
-            <label className="form-label">Additional Notes (optional)</label>
-            <textarea className="form-textarea"
-              placeholder="e.g. Students have prior knowledge of cell biology…"
-              value={form.additional_notes} onChange={e => set('additional_notes', e.target.value)}
-              style={{ minHeight: 55, maxHeight: 90, borderColor: '#bfdbfe' }}/>
-          </div>
-
-          {/* Upload Teaching Material */}
-          <div className="form-group">
-            <label className="form-label">Upload Your Material (optional)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" disabled={materialUploading} onClick={() => materialFileRef.current?.click()}
-                style={{ display:'flex',alignItems:'center',gap:6,padding:'7px 14px',borderRadius:8,
-                  border:'1.5px solid var(--accent-mid)',background:'var(--accent-soft)',
-                  color:'var(--accent)',fontSize:'0.82rem',fontWeight:600,cursor:'pointer' }}>
-                {materialUploading ? '⏳ Reading…' : '📄 Upload PDF / DOCX / TXT'}
+            {/* Include Topic Overview */}
+            <div className="form-group">
+              <label className="form-label">Output</label>
+              <button type="button" onClick={() => set('include_topic_overview', !form.include_topic_overview)} style={{
+                width: '100%', padding: '9px 14px', borderRadius: 10, fontFamily: 'var(--font)',
+                border: form.include_topic_overview ? '2px solid var(--accent)' : '1.5px solid var(--border)',
+                background: form.include_topic_overview ? 'var(--accent-soft)' : 'var(--surface)',
+                color: form.include_topic_overview ? 'var(--accent)' : 'var(--text-2)',
+                fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
+                transition: 'all 0.18s', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span style={{ width: 18, height: 18, borderRadius: 5,
+                  border: form.include_topic_overview ? '2px solid #399aff' : '1.5px solid #ccc',
+                  background: form.include_topic_overview ? '#399aff' : '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {form.include_topic_overview && <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"><polyline points="2 6 5 9 10 3"/></svg>}
+                </span>
+                Include Topic Overview page
               </button>
-              {sourceMaterial && <span style={{ fontSize:'0.78rem',color:'#10b981',fontWeight:600 }}>✓ {materialName}</span>}
-              {sourceMaterial && <button type="button" onClick={() => { setSourceMaterial(''); setMaterialName('') }}
-                style={{ fontSize:'0.75rem',color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:600 }}>✕ Remove</button>}
             </div>
-            <input ref={materialFileRef} type="file" accept=".pdf,.docx,.txt,.md" style={{ display:'none' }} onChange={handleMaterialUpload} />
-            {sourceMaterial && <div style={{ fontSize:'0.72rem',color:'var(--text-3)',marginTop:4 }}>AI will align the lesson to your uploaded material</div>}
+
+            {/* Additional Notes */}
+            <div className="form-group">
+              <label className="form-label">Additional Notes (optional)</label>
+              <textarea className="form-textarea"
+                placeholder="e.g. Students have prior knowledge of cell biology…"
+                value={form.additional_notes} onChange={e => set('additional_notes', e.target.value)}
+                style={{ minHeight: 55, maxHeight: 90, borderColor: '#bfdbfe' }}/>
+            </div>
+
+            {/* Upload Teaching Material */}
+            <div className="form-group">
+              <label className="form-label">Upload Your Material (optional)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" disabled={materialUploading} onClick={() => materialFileRef.current?.click()}
+                  style={{ display:'flex',alignItems:'center',gap:6,padding:'7px 14px',borderRadius:8,
+                    border:'1.5px solid var(--accent-mid)',background:'var(--accent-soft)',
+                    color:'var(--accent)',fontSize:'0.82rem',fontWeight:600,cursor:'pointer' }}>
+                  {materialUploading ? '⏳ Reading…' : '📄 Upload PDF / DOCX / TXT'}
+                </button>
+                {sourceMaterial && <span style={{ fontSize:'0.78rem',color:'#10b981',fontWeight:600 }}>✓ {materialName}</span>}
+                {sourceMaterial && <button type="button" onClick={() => { setSourceMaterial(''); setMaterialName('') }}
+                  style={{ fontSize:'0.75rem',color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:600 }}>✕ Remove</button>}
+              </div>
+              <input ref={materialFileRef} type="file" accept=".pdf,.docx,.txt,.md" style={{ display:'none' }} onChange={handleMaterialUpload} />
+              {sourceMaterial && <div style={{ fontSize:'0.72rem',color:'var(--text-3)',marginTop:4 }}>AI will align the lesson to your uploaded material</div>}
+            </div>
+
+            {errors.general && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', fontSize: '0.82rem', color: '#dc2626', fontWeight: 500 }}>
+                ⚠ {errors.general}
+              </div>
+            )}
+
+            <button className="btn btn-primary" onClick={generate} disabled={loading}
+              style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.95rem', marginTop: 4,
+                background: 'linear-gradient(135deg,#399aff,#1d7fe0)', boxShadow: '0 4px 14px rgba(57,154,255,0.35)' }}>
+              {loading
+                ? <><div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /> Generating…</>
+                : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Lesson Plan</>
+              }
+            </button>
+            <div style={{ height: 4 }}/>
           </div>
+        </div>
 
-          {errors.general && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', fontSize: '0.82rem', color: '#dc2626', fontWeight: 500 }}>
-              ⚠ {errors.general}
+        {/* ── RIGHT PANEL ── */}
+        <div style={{ height: PAGE_H, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} className="fade-up-1">
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <OutputBox result={result} loading={loading} toolName="lesson plan" onClear={clearResult}
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>}
+              />
             </div>
-          )}
-
-          <button className="btn btn-primary" onClick={generate} disabled={loading}
-            style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.95rem', marginTop: 4,
-              background: 'linear-gradient(135deg,#399aff,#1d7fe0)', boxShadow: '0 4px 14px rgba(57,154,255,0.35)' }}>
-            {loading
-              ? <><div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /> Generating…</>
-              : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Lesson Plan</>
-            }
-          </button>
-          <div style={{ height: 4 }}/>
+            {result && !loading && (
+              <EnrichBanner onAction={enrich} busy={enrichBusy} />
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── RIGHT PANEL ── */}
-      <div style={{ height: PAGE_H, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} className="fade-up-1">
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <OutputBox result={result} loading={loading} toolName="lesson plan" onClear={clearResult}
-            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>}
-          />
-        </div>
-      </div>
-    </div>
-
-    {/* Chat History Sidebar */}
-    <ChatHistory
-      isOpen={showHistory}
-      onClose={() => setShowHistory(false)}
-      teacherId={TEACHER_ID}
-      onSelectChat={(chat) => {
-        saveResult(chat.content || chat.preview)
-        setShowHistory(false)
-      }}
-    />
+      <ChatHistory
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        teacherId={TEACHER_ID}
+        onSelectChat={(chat) => {
+          saveResult(chat.content || chat.preview)
+          setShowHistory(false)
+        }}
+      />
     </div>
   )
 }

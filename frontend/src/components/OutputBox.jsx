@@ -29,7 +29,6 @@ export function downloadTxt(content, filename) {
 
 // ── PDF DOWNLOAD ──────────────────────────────────────
 function downloadPDF(content, toolName) {
-  // Dynamically load jsPDF from CDN
   const script = document.createElement('script')
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
   script.onload = () => {
@@ -47,74 +46,77 @@ function downloadPDF(content, toolName) {
     lines.forEach(line => {
       const trimmed = line.trim()
 
-      // Page break check
-      if (y > pageH - margin) {
-        doc.addPage()
-        y = margin
-      }
+      if (y > pageH - margin) { doc.addPage(); y = margin }
+      if (!trimmed) { y += 4; return }
 
-      if (!trimmed) {
-        y += 4
-        return
-      }
-
-      // Heading detection (bold-only line or ### ## #)
+      // ── Heading ──
       const hMatch = trimmed.match(/^(#{1,4})\s+(.+)/)
       const isBoldOnly = /^\*\*[^*]+\*\*$/.test(trimmed)
 
       if (hMatch || isBoldOnly) {
-        const text = hMatch ? hMatch[2] : trimmed.slice(2, -2)
+        const text = hMatch ? hMatch[2].replace(/\*\*([^*]+)\*\*/g, '$1') : trimmed.slice(2, -2)
         const level = hMatch ? hMatch[1].length : 2
         const size  = level === 1 ? 14 : level === 2 ? 12 : 11
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(size)
-        doc.setTextColor(11, 27, 45)
+        doc.setTextColor(10, 10, 10) // True black
+        y += level <= 2 ? 4 : 2
         const wrapped = doc.splitTextToSize(text, maxW)
         if (y + wrapped.length * 6 > pageH - margin) { doc.addPage(); y = margin }
         doc.text(wrapped, margin, y)
         y += wrapped.length * 6 + 3
+        // Draw underline for h1/h2
+        if (level <= 2) {
+          doc.setDrawColor(57, 154, 255)
+          doc.setLineWidth(0.4)
+          doc.line(margin, y - 1, margin + maxW * 0.35, y - 1)
+          y += 2
+        }
         return
       }
 
-      // Numbered question
+      // ── Numbered question ──
       const qMatch = trimmed.match(/^(\d+)[.)]\s+(.+)/)
       if (qMatch) {
+        const clean = qMatch[2].replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(10)
-        doc.setTextColor(57, 154, 255)
+        doc.setTextColor(57, 154, 255) // Blue number
         doc.text(`${qMatch[1]}.`, margin, y)
         doc.setFont('helvetica', 'normal')
-        doc.setTextColor(11, 27, 45)
-        const wrapped = doc.splitTextToSize(qMatch[2], maxW - 8)
+        doc.setTextColor(10, 10, 10)
+        const wrapped = doc.splitTextToSize(clean, maxW - 8)
         if (y + wrapped.length * 5.5 > pageH - margin) { doc.addPage(); y = margin }
         doc.text(wrapped, margin + 8, y)
         y += wrapped.length * 5.5 + 2
         return
       }
 
-      // Answer option A) B) C) D)
+      // ── Answer option A) B) C) D) ──
       const optMatch = trimmed.match(/^([A-Da-d])[.)]\s+(.+)/)
       if (optMatch) {
+        const clean = optMatch[2].replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(9.5)
-        doc.setTextColor(61, 85, 110)
+        doc.setTextColor(57, 154, 255)
         doc.text(`${optMatch[1].toUpperCase()})`, margin + 6, y)
         doc.setFont('helvetica', 'normal')
-        doc.setTextColor(11, 27, 45)
-        const wrapped = doc.splitTextToSize(optMatch[2], maxW - 16)
+        doc.setTextColor(40, 40, 40)
+        const wrapped = doc.splitTextToSize(clean, maxW - 16)
         if (y + wrapped.length * 5 > pageH - margin) { doc.addPage(); y = margin }
         doc.text(wrapped, margin + 14, y)
         y += wrapped.length * 5 + 1.5
         return
       }
 
-      // Bullet
+      // ── Bullet ──
       if (/^[-•*]\s+/.test(trimmed)) {
-        const text = trimmed.replace(/^[-•*]\s+/, '')
+        const text = trimmed.replace(/^[-•*]\s+/, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
-        doc.setTextColor(11, 27, 45)
+        doc.setTextColor(57, 154, 255)
         doc.text('•', margin + 4, y)
+        doc.setTextColor(40, 40, 40)
         const wrapped = doc.splitTextToSize(text, maxW - 10)
         if (y + wrapped.length * 5.5 > pageH - margin) { doc.addPage(); y = margin }
         doc.text(wrapped, margin + 10, y)
@@ -122,11 +124,20 @@ function downloadPDF(content, toolName) {
         return
       }
 
-      // Normal paragraph — strip **bold** markers for PDF
+      // ── Horizontal rule ──
+      if (/^[-=]{3,}$/.test(trimmed)) {
+        doc.setDrawColor(200, 200, 200)
+        doc.setLineWidth(0.3)
+        doc.line(margin, y, margin + maxW, y)
+        y += 4
+        return
+      }
+
+      // ── Normal paragraph ──
       const clean = trimmed.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
-      doc.setTextColor(61, 85, 110)
+      doc.setTextColor(40, 60, 90) // Dark blue-gray
       const wrapped = doc.splitTextToSize(clean, maxW)
       if (y + wrapped.length * 5.5 > pageH - margin) { doc.addPage(); y = margin }
       doc.text(wrapped, margin, y)
@@ -139,7 +150,7 @@ function downloadPDF(content, toolName) {
 }
 
 // ── INLINE RENDERER ───────────────────────────────────
-function InlineLine({ text }) {
+function InlineLine({ text, color }) {
   const parts = []
   const regex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g
   let last = 0, m
@@ -153,8 +164,8 @@ function InlineLine({ text }) {
   return (
     <>
       {parts.map((p, i) =>
-        p.type === 'bold'   ? <strong key={i}>{p.val}</strong> :
-        p.type === 'italic' ? <em key={i}>{p.val}</em> :
+        p.type === 'bold'   ? <strong key={i} style={{ color: '#0a0a0a', fontWeight: 700 }}>{p.val}</strong> :
+        p.type === 'italic' ? <em key={i} style={{ color: color || '#2563eb', fontStyle: 'italic' }}>{p.val}</em> :
         <span key={i}>{p.val}</span>
       )}
     </>
@@ -173,6 +184,7 @@ function extractHeaderLabel(line) {
   return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : ''
 }
 
+// ── CONTENT PARSER ────────────────────────────────────
 function parseContent(text) {
   const lines = text.split('\n')
   const blocks = []
@@ -191,58 +203,185 @@ function parseContent(text) {
     const line = lines[i]
     const trimmed = line.trim()
     if (!trimmed) { blocks.push({ type: 'blank' }); i++; continue }
+    // Horizontal rule
+    if (/^[-=]{3,}$/.test(trimmed)) { blocks.push({ type: 'hr' }); i++; continue }
+    // Headings
     const hMatch = trimmed.match(/^(#{1,4})\s+(.+)/)
     if (hMatch) { blocks.push({ type: 'heading', level: hMatch[1].length, text: hMatch[2] }); i++; continue }
     if (/^\*\*[^*]+\*\*$/.test(trimmed)) { blocks.push({ type: 'heading', level: 3, text: trimmed.slice(2, -2) }); i++; continue }
+    // Numbered items
     const qMatch = trimmed.match(/^(\d+)[.)]\s+(.+)/)
     if (qMatch) { blocks.push({ type: 'question', num: qMatch[1], text: qMatch[2] }); i++; continue }
+    // Options
     const optMatch = trimmed.match(/^([A-Da-d])[.)]\s+(.+)/)
     if (optMatch) { blocks.push({ type: 'option', label: optMatch[1].toUpperCase(), text: optMatch[2] }); i++; continue }
+    // Bullets
     if (/^[-•*]\s+/.test(trimmed)) { blocks.push({ type: 'bullet', text: trimmed.replace(/^[-•*]\s+/, '') }); i++; continue }
+    // Table row
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) { blocks.push({ type: 'table_row', text: trimmed }); i++; continue }
+    // Normal paragraph
     blocks.push({ type: 'para', text: trimmed }); i++
   }
   return { blocks, headerFills }
 }
 
+// ── RENDERED OUTPUT (THE MAIN VISUAL ENGINE) ──────────
 function RenderedOutput({ text }) {
   const { blocks, headerFills } = parseContent(text)
+
+  // Collect table rows into groups
+  const renderBlocks = []
+  let tableBuffer = []
+  blocks.forEach((b, i) => {
+    if (b.type === 'table_row') {
+      tableBuffer.push(b.text)
+    } else {
+      if (tableBuffer.length > 0) {
+        renderBlocks.push({ type: 'table', rows: [...tableBuffer] })
+        tableBuffer = []
+      }
+      renderBlocks.push(b)
+    }
+  })
+  if (tableBuffer.length > 0) renderBlocks.push({ type: 'table', rows: [...tableBuffer] })
+
   return (
-    <div style={{ fontFamily: 'var(--font, inherit)', fontSize: '0.92rem', lineHeight: 1.8, color: 'var(--text-1)' }}>
+    <div style={{ fontFamily: 'var(--font, "Inter", system-ui, sans-serif)', fontSize: '0.88rem', lineHeight: 1.85, color: '#2563eb' }}>
+
+      {/* Header fill fields */}
       {headerFills.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6, marginBottom: 20, paddingBottom: 14, borderBottom: '1px dashed var(--border, #e5e7eb)' }}>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+          marginBottom: 24, paddingBottom: 16,
+          borderBottom: '2px solid #e5e7eb',
+        }}>
           {headerFills.map(label => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)', minWidth: 56 }}>{label}:</span>
-              <div style={{ width: 180, borderBottom: '1.5px solid var(--text-1, #1e1e2e)', height: 22, display: 'inline-block' }} />
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#0a0a0a', minWidth: 70 }}>{label}:</span>
+              <div style={{ width: 200, borderBottom: '1.5px solid #94a3b8', height: 22 }} />
             </div>
           ))}
         </div>
       )}
-      {blocks.map((b, i) => {
-        if (b.type === 'blank') return <div key={i} style={{ height: 10 }} />
+
+      {renderBlocks.map((b, i) => {
+        if (b.type === 'blank') return <div key={i} style={{ height: 8 }} />
+
+        if (b.type === 'hr') return (
+          <div key={i} style={{ height: 1, background: 'linear-gradient(90deg, #e5e7eb 0%, #bfdbfe 50%, #e5e7eb 100%)', margin: '16px 0' }} />
+        )
+
         if (b.type === 'heading') {
-          const sizes = { 1: '1.2rem', 2: '1.05rem', 3: '0.97rem', 4: '0.92rem' }
-          return <div key={i} style={{ fontWeight: 700, fontSize: sizes[b.level] || '0.97rem', color: 'var(--text-1)', marginTop: b.level <= 2 ? 20 : 14, marginBottom: 6 }}><InlineLine text={b.text} /></div>
+          const isH1 = b.level === 1
+          const isH2 = b.level === 2
+          return (
+            <div key={i} style={{
+              fontWeight: 800,
+              fontSize: isH1 ? '1.25rem' : isH2 ? '1.08rem' : b.level === 3 ? '0.96rem' : '0.9rem',
+              color: '#0a0a0a',
+              marginTop: isH1 ? 28 : isH2 ? 22 : 16,
+              marginBottom: isH1 || isH2 ? 8 : 5,
+              paddingBottom: isH1 || isH2 ? 8 : 0,
+              borderBottom: isH1 ? '2.5px solid #2563eb' : isH2 ? '1.5px solid #bfdbfe' : 'none',
+              letterSpacing: isH1 ? '-0.3px' : '-0.1px',
+              lineHeight: 1.4,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              {isH1 && <span style={{ width: 4, height: 20, background: '#2563eb', borderRadius: 2, flexShrink: 0 }} />}
+              <InlineLine text={b.text} color="#0a0a0a" />
+            </div>
+          )
         }
+
         if (b.type === 'question') return (
-          <div key={i} style={{ marginTop: 18, marginBottom: 4 }}>
-            <span style={{ fontWeight: 700, color: 'var(--accent)', marginRight: 6 }}>{b.num}.</span>
-            <InlineLine text={b.text} />
+          <div key={i} style={{
+            marginTop: 16, marginBottom: 4, display: 'flex', gap: 8, alignItems: 'flex-start',
+            paddingLeft: 2,
+          }}>
+            <span style={{
+              fontWeight: 800, color: '#2563eb', minWidth: 28, textAlign: 'right',
+              fontSize: '0.9rem', paddingTop: 1, flexShrink: 0,
+            }}>{b.num}.</span>
+            <span style={{ color: '#1e293b', fontWeight: 500, flex: 1 }}>
+              <InlineLine text={b.text} color="#1e293b" />
+            </span>
           </div>
         )
+
         if (b.type === 'option') return (
-          <div key={i} style={{ paddingLeft: 24, marginBottom: 2, display: 'flex', gap: 8, alignItems: 'baseline' }}>
-            <span style={{ fontWeight: 600, color: 'var(--text-2)', minWidth: 20 }}>{b.label})</span>
-            <InlineLine text={b.text} />
+          <div key={i} style={{
+            paddingLeft: 42, marginBottom: 3, display: 'flex', gap: 8, alignItems: 'baseline',
+          }}>
+            <span style={{
+              fontWeight: 700, color: '#2563eb', minWidth: 24,
+              fontSize: '0.84rem',
+              background: '#eff6ff', borderRadius: 4, padding: '1px 6px',
+              textAlign: 'center', flexShrink: 0,
+            }}>{b.label}</span>
+            <span style={{ color: '#334155' }}>
+              <InlineLine text={b.text} color="#334155" />
+            </span>
           </div>
         )
+
         if (b.type === 'bullet') return (
-          <div key={i} style={{ paddingLeft: 20, marginBottom: 3, display: 'flex', gap: 8, alignItems: 'baseline' }}>
-            <span style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '0.7rem', marginTop: 4 }}>●</span>
-            <InlineLine text={b.text} />
+          <div key={i} style={{
+            paddingLeft: 16, marginBottom: 4, display: 'flex', gap: 10, alignItems: 'flex-start',
+          }}>
+            <span style={{
+              color: '#2563eb', fontWeight: 700, fontSize: '0.5rem', marginTop: 8,
+              flexShrink: 0,
+            }}>●</span>
+            <span style={{ color: '#334155', flex: 1 }}>
+              <InlineLine text={b.text} color="#334155" />
+            </span>
           </div>
         )
-        return <p key={i} style={{ margin: '4px 0 8px', color: 'var(--text-2)' }}><InlineLine text={b.text} /></p>
+
+        // Table rendering
+        if (b.type === 'table') {
+          const rows = b.rows
+            .filter(r => !/^[|:\-\s]+$/.test(r)) // skip separator rows
+            .map(r => r.split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length).map(c => c.trim()))
+          if (rows.length === 0) return null
+          const header = rows[0]
+          const body = rows.slice(1)
+          return (
+            <div key={i} style={{ margin: '14px 0', overflowX: 'auto', borderRadius: 10, border: '1.5px solid #e2e8f0' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ background: '#f0f7ff' }}>
+                    {header.map((h, hi) => (
+                      <th key={hi} style={{
+                        padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#0a0a0a',
+                        borderBottom: '2px solid #bfdbfe', fontSize: '0.82rem',
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {body.map((row, ri) => (
+                    <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                      {row.map((cell, ci) => (
+                        <td key={ci} style={{
+                          padding: '8px 14px', color: '#334155', borderBottom: '1px solid #f1f5f9',
+                          fontWeight: ci === 0 ? 600 : 400,
+                        }}><InlineLine text={cell} color="#334155" /></td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+
+        // Paragraph
+        return (
+          <p key={i} style={{ margin: '5px 0 8px', color: '#334155', paddingLeft: 2, lineHeight: 1.8 }}>
+            <InlineLine text={b.text} color="#334155" />
+          </p>
+        )
       })}
     </div>
   )
@@ -329,11 +468,11 @@ export default function OutputBox({ result, loading, toolName = 'output', icon, 
         </div>
 
         {/* Scrollable content */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px', scrollbarWidth: 'thin', scrollbarColor: 'var(--accent-mid) transparent' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '28px 28px', scrollbarWidth: 'thin', scrollbarColor: '#bfdbfe transparent' }}>
           {isEmpty && (
             <div className="output-placeholder">
               <div className="output-placeholder-icon">
-                <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                 </svg>
               </div>

@@ -1,131 +1,29 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useMemo } from 'react'
 import OutputBox from '../components/OutputBox'
 import CustomSelect from '../components/CustomSelect'
 import ChatHistory from '../components/ChatHistory'
 import UsageCounter from '../components/UsageCounter'
 import ErrorToast from '../components/ErrorToast'
 import { useAuth } from '../context/AuthContext'
+import {
+  GRADES, getCoreSubjects, getMiscSubjects, getCoreTopics, getMiscTopics,
+  findTopicDescription,
+} from '../data/cbseSubjects'
 
 const API = window.location.hostname === 'localhost' ? 'http://localhost:8001' : window.location.origin
 const STORAGE_KEY = 'classroom-result-worksheet'
 
-const grades   = ['Kindergarten','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5','Grade 6','Grade 7','Grade 8','Grade 9','Grade 10','Grade 11','Grade 12']
-const subjects = ['Mathematics','Science','English Language Arts','Social Studies','History','Geography','Physics','Chemistry','Biology','Computer Science','Art','Music','Physical Education','Foreign Language','Other']
-const types    = [
+const worksheetTypes = [
   { value: 'mixed',           label: '🔀 Mixed' },
   { value: 'fill_blank',      label: '✏️ Fill in the Blank' },
   { value: 'multiple_choice', label: '🔘 Multiple Choice' },
   { value: 'qa',              label: '💬 Question & Answer' },
 ]
 
-
-const TOPIC_SUGGESTIONS = {
-  'Mathematics': {
-    'Kindergarten': ['Counting 1–10','Basic Shapes','More & Less'],
-    'Grade 1': ['Addition & Subtraction','Number Patterns','Measurement'],
-    'Grade 2': ['Place Value','2-Digit Addition','Basic Fractions'],
-    'Grade 3': ['Multiplication Tables','Division Basics','Fractions'],
-    'Grade 4': ['Long Multiplication','Decimals','Area & Perimeter'],
-    'Grade 5': ['Fractions & Decimals','Order of Operations','Geometry Basics'],
-    'Grade 6': ['Ratios & Proportions','Integers','Algebraic Expressions'],
-    'Grade 7': ['Linear Equations','Percentages','Statistics'],
-    'Grade 8': ['Algebra','Pythagorean Theorem','Functions'],
-    'Grade 9': ['Quadratic Equations','Polynomials','Graphing Lines'],
-    'Grade 10': ['Trigonometry','Probability','Sequences & Series'],
-    'Grade 11': ['Calculus Intro','Logarithms','Matrices'],
-    'Grade 12': ['Calculus','Advanced Statistics','Complex Numbers'],
-  },
-  'Science': {
-    'Kindergarten': ['Living & Non-living Things','Weather','Plants Around Us'],
-    'Grade 1': ['Animal Habitats','Seasons','The Five Senses'],
-    'Grade 2': ['Life Cycles','Solids & Liquids','Earth Materials'],
-    'Grade 3': ['Food Chains','Magnetism','Weather Patterns'],
-    'Grade 4': ['Ecosystems','Electricity','Rocks & Minerals'],
-    'Grade 5': ['Photosynthesis','The Solar System','Matter & Energy'],
-    'Grade 6': ['Cell Structure','Earth\'s Layers','Force & Motion'],
-    'Grade 7': ['Human Body Systems','Chemical Reactions','Ecosystems'],
-    'Grade 8': ['Genetics Basics','Waves & Sound','Newton\'s Laws'],
-    'Grade 9': ['Atomic Structure','Natural Selection','Types of Energy'],
-    'Grade 10': ['Periodic Table','Photosynthesis & Respiration','Plate Tectonics','Chemical Bonding','Acids & Bases','Human Body Systems','Genetics','Ecology & Environment','Newton\'s Laws','Wave Properties'],
-    'Grade 11': ['Organic Chemistry','Genetics & DNA','Thermodynamics'],
-    'Grade 12': ['Quantum Physics','Biotechnology','Environmental Science'],
-  },
-  'English Language Arts': {
-    'Kindergarten': ['Alphabet & Phonics','Sight Words','Story Sequencing'],
-    'Grade 1': ['Short Vowels','Reading Comprehension','Sentence Writing'],
-    'Grade 2': ['Nouns & Verbs','Main Idea & Details','Story Elements'],
-    'Grade 3': ['Adjectives & Adverbs','Paragraph Writing','Point of View'],
-    'Grade 4': ['Figurative Language','Essay Structure','Summarizing Texts'],
-    'Grade 5': ['Theme & Plot','Persuasive Writing','Vocabulary in Context'],
-    'Grade 6': ['Literary Devices','Argumentative Writing','Text Structure'],
-    'Grade 7': ['Character Analysis','Narrative Writing','Making Inferences'],
-    'Grade 8': ['Using Textual Evidence','Research Writing','Rhetorical Devices'],
-    'Grade 9': ['Literary Analysis','Expository Writing','Introduction to Shakespeare'],
-    'Grade 10': ['Poetry Analysis','Comparative Essays','Rhetoric & Persuasion'],
-    'Grade 11': ['American Literature','Synthesis Writing','AP Style Essays'],
-    'Grade 12': ['World Literature','College Essay Writing','Critical Analysis'],
-  },
-  'History': {
-    'Grade 3': ['Community History','Native Americans','Colonial Life'],
-    'Grade 4': ['State History','American Revolution','Westward Expansion'],
-    'Grade 5': ['Civil War','US Constitution','Industrial Revolution'],
-    'Grade 6': ['Ancient Egypt','Ancient Greece','Ancient Rome'],
-    'Grade 7': ['Middle Ages','The Renaissance','Age of Exploration'],
-    'Grade 8': ['American Revolution','Civil War & Reconstruction','Immigration'],
-    'Grade 9': ['World War I','Russian Revolution','The Great Depression'],
-    'Grade 10': ['World War II','The Cold War','Decolonization Movements'],
-    'Grade 11': ['US History Overview','Vietnam War','Civil Rights Movement'],
-    'Grade 12': ['Modern World History','Genocide Studies','Global Conflicts'],
-  },
-  'Geography': {
-    'Grade 3': ['Maps & Globes','Continents & Oceans','My Community'],
-    'Grade 4': ['US Regions','Climate Zones','Natural Resources'],
-    'Grade 5': ['World Regions','Human & Physical Geography','Migration'],
-    'Grade 6': ['Latitude & Longitude','Biomes','World Population'],
-    'Grade 7': ['World Cultures','Rivers & Mountains','Trade Routes'],
-    'Grade 8': ['US Geography','Economic Geography','Political Maps'],
-    'Grade 9': ['Physical Geography','Urbanization','Environmental Issues'],
-    'Grade 10': ['Human Geography','Globalization','Cultural Landscapes'],
-    'Grade 11': ['AP Human Geography','Development Patterns','Geopolitics'],
-    'Grade 12': ['Economic Geography','Environmental Policy','World Systems'],
-  },
-  'Biology': {
-    'Grade 6': ['Cell Structure','Ecosystems','Plant Biology'],
-    'Grade 7': ['Human Body Systems','Genetics Intro','Microbiology'],
-    'Grade 8': ['Evolution','DNA & Heredity','Ecology'],
-    'Grade 9': ['Cell Division','Natural Selection','Biomes'],
-    'Grade 10': ['Photosynthesis & Respiration','Genetics','Classification of Life'],
-    'Grade 11': ['Molecular Biology','Animal Behavior','Human Physiology'],
-    'Grade 12': ['Biotechnology','Advanced Genetics','Environmental Biology'],
-  },
-  'Chemistry': {
-    'Grade 9': ['Atomic Structure','Periodic Table','Chemical Bonding'],
-    'Grade 10': ['Chemical Reactions','Acids & Bases','Stoichiometry'],
-    'Grade 11': ['Organic Chemistry','Equilibrium','Thermochemistry'],
-    'Grade 12': ['Electrochemistry','Nuclear Chemistry','Advanced Organic Compounds'],
-  },
-  'Physics': {
-    'Grade 9': ['Motion & Speed','Newton\'s Laws','Energy Types'],
-    'Grade 10': ['Waves & Sound','Electricity Basics','Magnetism'],
-    'Grade 11': ['Thermodynamics','Optics','Circular Motion'],
-    'Grade 12': ['Quantum Mechanics','Relativity','Nuclear Physics'],
-  },
-  'Computer Science': {
-    'Grade 3': ['Basic Computer Parts','Introduction to Coding','Internet Safety'],
-    'Grade 5': ['Scratch Programming','Algorithms','Binary Numbers'],
-    'Grade 7': ['Python Basics','Web Design','Data & Databases'],
-    'Grade 9': ['Programming Logic','Data Structures','Cybersecurity'],
-    'Grade 11': ['Object-Oriented Programming','AI & Machine Learning','Software Design'],
-    'Grade 12': ['Advanced Algorithms','Computer Networks','App Development'],
-  },
-  'default': ['Introduction to the Topic','Key Concepts & Vocabulary','Review & Practice Questions','Critical Thinking','Real-World Applications'],
-}
-
-function getTopicSuggestions(subject, grade) {
-  const subjectMap = TOPIC_SUGGESTIONS[subject]
-  if (!subjectMap) return TOPIC_SUGGESTIONS['default']
-  return subjectMap[grade] || TOPIC_SUGGESTIONS['default']
-}
+/* ── Accent palette (blue) ─────────────────── */
+const ACCENT      = '#399aff'
+const ACCENT_SOFT = '#eff6ff'
+const ACCENT_MID  = '#bfdbfe'
 
 function VoiceMic({ onResult, disabled }) {
   const [listening, setListening] = useState(false)
@@ -143,11 +41,11 @@ function VoiceMic({ onResult, disabled }) {
     rec.start(); recRef.current = rec; setListening(true)
   }
   return (
-    <button type="button" onClick={toggle} title={listening ? 'Stop' : 'Speak topic'} disabled={disabled} style={{
+    <button type="button" onClick={toggle} title={listening ? 'Stop' : 'Speak'} disabled={disabled} style={{
       position: 'absolute', right: 9, top: 9, width: 30, height: 30, borderRadius: '50%',
-      border: listening ? '2px solid #ef4444' : '1.5px solid var(--accent-mid)',
-      background: listening ? '#fef2f2' : 'var(--accent-soft)',
-      color: listening ? '#ef4444' : 'var(--accent)',
+      border: listening ? '2px solid #ef4444' : `1.5px solid ${ACCENT_MID}`,
+      background: listening ? '#fef2f2' : ACCENT_SOFT,
+      color: listening ? '#ef4444' : ACCENT,
       cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
       transition: 'all 0.2s', opacity: disabled ? 0.4 : 1,
       boxShadow: listening ? '0 0 0 4px rgba(239,68,68,0.15)' : 'none',
@@ -170,79 +68,75 @@ const lockScroll = (e) => {
   e.stopPropagation()
 }
 
-const scrollStyle = { overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'thin', scrollbarColor: 'var(--accent-mid) transparent' }
+const scrollStyle = { overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'thin', scrollbarColor: `${ACCENT_MID} transparent` }
 const PAGE_H    = 'calc(100vh - var(--header-h) - 56px)'
-const FORM_BODY = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 14, scrollbarWidth: 'thin', scrollbarColor: 'var(--accent-mid) transparent' }
+const FORM_BODY = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 14, scrollbarWidth: 'thin', scrollbarColor: `${ACCENT_MID} transparent` }
 
-const fieldBorder = (err) => err ? '#fca5a5' : undefined
 const ErrMsg = ({ msg }) => msg ? <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: 4, fontWeight: 500 }}>⚠ {msg}</div> : null
+
+// ── Track tabs (Core / Miscellaneous) ─────────────────
+function TrackTabs({ value, onChange, coreCount, miscCount, disabled }) {
+  const tabs = [
+    { key: 'core', label: 'Core (CBSE/NCERT)', count: coreCount, color: '#10b981', bg: '#ecfdf5', border: '#bbf7d0' },
+    { key: 'misc', label: 'Miscellaneous',     count: miscCount, color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
+  ]
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 6, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+      {tabs.map(t => {
+        const active = value === t.key
+        return (
+          <button key={t.key} type="button" onClick={() => onChange(t.key)} style={{
+            flex: 1, padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
+            fontSize: '0.78rem', fontWeight: 600, fontFamily: 'var(--font)',
+            border: active ? `1.5px solid ${t.color}` : '1.5px solid var(--border)',
+            background: active ? t.bg : 'var(--surface)',
+            color: active ? t.color : 'var(--text-2)',
+            transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}>
+            {t.label}
+            <span style={{
+              fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+              background: active ? t.color : '#e5e7eb', color: active ? '#fff' : 'var(--text-2)',
+            }}>{t.count}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function WorksheetGenerator() {
   const { teacherId: TEACHER_ID } = useAuth()
-  const STUDENT_ID = 'student-' + (Math.random().toString(36).substring(7))
   const [form, setForm] = useState({
-    topic: '', grade_level: '', subject: '',
-    worksheet_type: 'mixed', num_questions: 10, additional_instructions: '',
+    grade_level: '', subject: '', topic: '',
+    worksheet_type: 'mixed', num_questions: 10,
+    additional_instructions: '',
   })
-  const [result, setResult] = useState(() => localStorage.getItem(STORAGE_KEY) || '')
+  const [subjectTrack, setSubjectTrack] = useState('core')
+  const [topicTrack, setTopicTrack]     = useState('core')
+  const [customTopic, setCustomTopic]   = useState('')
+  const [result, setResult]   = useState(() => localStorage.getItem(STORAGE_KEY) || '')
   const [loading, setLoading] = useState(false)
   const [errors, setErrors]   = useState({})
   const [showHistory, setShowHistory] = useState(false)
-  const [limitError, setLimitError] = useState(null)
-  const [adaptiveDifficulty, setAdaptiveDifficulty] = useState(0.5)
-  const [showAdaptive, setShowAdaptive] = useState(false)
-  const [sourceMaterial, setSourceMaterial] = useState('')
-  const [materialName, setMaterialName] = useState('')
-  const [materialUploading, setMaterialUploading] = useState(false)
+  const [limitError, setLimitError] = useState('')
   const usageCounterRef = useRef(null)
+  const [sourceMaterial, setSourceMaterial] = useState('')
+  const [materialName, setMaterialName]     = useState('')
+  const [materialUploading, setMaterialUploading] = useState(false)
   const materialFileRef = useRef(null)
 
   const handleMaterialUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+    const file = e.target.files[0]; if (!file) return
     setMaterialUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await fetch(`${API}/api/upload-material`, { method: 'POST', body: formData })
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`${API}/api/upload-material`, { method: 'POST', body: fd })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Upload failed')
-      setSourceMaterial(data.text)
-      setMaterialName(file.name)
-    } catch (e) {
-      alert('Could not read file: ' + e.message)
-    } finally {
-      setMaterialUploading(false)
-      e.target.value = ''
-    }
-  }
-
-  // Register student with adaptive learning system on mount
-  useEffect(() => {
-    if (form.subject && form.grade_level) {
-      registerStudent()
-    }
-  }, [form.subject, form.grade_level])
-
-  const registerStudent = async () => {
-    try {
-      await fetch(`${API}/api/adaptive/submit-answer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          student_id: STUDENT_ID,
-          teacher_id: TEACHER_ID,
-          topic: form.topic || 'Worksheet',
-          question_id: 0,
-          answer: 'registered',
-          is_correct: true,
-          time_taken: 0,
-          difficulty_rating: 0.5
-        })
-      }).catch(() => {}) // Silent fail if adaptive system not available
-    } catch (e) {
-      console.log('Adaptive tracking not available')
-    }
+      setSourceMaterial(data.text); setMaterialName(file.name)
+    } catch (e) { alert('Could not read file: ' + e.message) }
+    finally { setMaterialUploading(false); e.target.value = '' }
   }
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })) }
@@ -250,19 +144,69 @@ export default function WorksheetGenerator() {
   const saveResult  = (val) => { setResult(val); localStorage.setItem(STORAGE_KEY, val) }
   const clearResult = ()    => { setResult(''); localStorage.removeItem(STORAGE_KEY) }
 
+  // Derived option lists
+  const coreSubjects = useMemo(() => getCoreSubjects(form.grade_level), [form.grade_level])
+  const miscSubjects = useMemo(() => getMiscSubjects(form.grade_level), [form.grade_level])
+  const coreTopics   = useMemo(() => getCoreTopics(form.grade_level, form.subject), [form.grade_level, form.subject])
+  const miscTopics   = useMemo(() => getMiscTopics(form.grade_level, form.subject), [form.grade_level, form.subject])
+
+  const subjectOptions = subjectTrack === 'core' ? coreSubjects : miscSubjects
+  const topicOptions   = topicTrack   === 'core' ? coreTopics   : miscTopics
+
+  const subjectLocked = !form.grade_level
+  const topicLocked   = !form.subject
+
+  // Reset dependent fields when parents change
+  const onGradeChange = (val) => {
+    setForm(f => ({ ...f, grade_level: val, subject: '', topic: '' }))
+    setSubjectTrack('core'); setTopicTrack('core'); setCustomTopic('')
+    setErrors({})
+  }
+  const onSubjectTrackChange = (t) => {
+    setSubjectTrack(t)
+    setForm(f => ({ ...f, subject: '', topic: '' }))
+    setTopicTrack('core'); setCustomTopic('')
+  }
+  const onSubjectChange = (val) => {
+    setForm(f => ({ ...f, subject: val, topic: '' }))
+    if (subjectTrack === 'misc') setTopicTrack('misc')
+    else setTopicTrack('core')
+    setCustomTopic('')
+  }
+  const onTopicTrackChange = (t) => {
+    setTopicTrack(t); setForm(f => ({ ...f, topic: '' })); setCustomTopic('')
+  }
+
+  // Build topic metadata for backend
+  const buildTopicMeta = () => {
+    const effectiveTopic = (form.topic && form.topic.trim()) || customTopic.trim()
+    if (!effectiveTopic) return { topic: '', description: '', track: topicTrack }
+    let description = ''
+    if (topicTrack === 'core') {
+      description = findTopicDescription(form.grade_level, form.subject, effectiveTopic) || ''
+    } else {
+      const m = miscTopics.find(t => t.label === effectiveTopic)
+      description = m?.description || ''
+    }
+    return { topic: effectiveTopic, description, track: topicTrack }
+  }
+
   const validate = () => {
     const e = {}
-    if (!form.subject)      e.subject     = 'Please select a subject.'
     if (!form.grade_level)  e.grade_level = 'Please select a grade level.'
-    if (!form.topic.trim()) e.topic       = 'Please enter or select a topic.'
+    if (!form.subject)      e.subject     = 'Please select a subject.'
+    const { topic } = buildTopicMeta()
+    if (!topic) e.topic = 'Please select or type a topic.'
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
   const generate = async () => {
     if (!validate()) return
+    setLoading(true); saveResult('')
 
-    // Check usage limit first
+    const { topic, description, track } = buildTopicMeta()
+
     try {
       const usageRes = await fetch(`${API}/api/increment-usage`, {
         method: 'POST',
@@ -270,294 +214,278 @@ export default function WorksheetGenerator() {
         body: JSON.stringify({ teacher_id: TEACHER_ID, tool_name: 'worksheet' })
       })
       const usageData = await usageRes.json()
-
       if (usageData.exceeded) {
-        setLimitError(usageData.error)
-        return
+        setLimitError(usageData.error || 'Daily limit exceeded. Try again tomorrow.')
+        setLoading(false); return
       }
-    } catch (e) {
-      console.error('Error checking usage:', e)
-    }
+    } catch (e) { console.error('Usage check failed:', e) }
 
-    // Get adaptive difficulty
     try {
-      const diffRes = await fetch(`${API}/api/adaptive/student-progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: STUDENT_ID })
-      })
-      if (diffRes.ok) {
-        const diffData = await diffRes.json()
-        setAdaptiveDifficulty(diffData.progress?.overall_mastery || 0.5)
+      const payload = {
+        ...form,
+        topic,
+        topic_description: description,
+        topic_track: track,
+        source_material: sourceMaterial,
       }
-    } catch (e) {
-      console.log('Adaptive difficulty not available')
-    }
-
-    setLoading(true); saveResult('')
-    try {
       const res  = await fetch(`${API}/api/worksheet`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          adaptive_difficulty: adaptiveDifficulty,
-          source_material: sourceMaterial,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Error')
       saveResult(data.result)
 
-      // Refresh usage counter immediately
-      if (usageCounterRef.current) {
-        usageCounterRef.current.refresh()
-      }
+      if (usageCounterRef.current) usageCounterRef.current.refresh()
 
-      // Track generation with adaptive system
-      fetch(`${API}/api/adaptive/submit-answer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          student_id: STUDENT_ID,
-          question_id: 1,
-          teacher_id: TEACHER_ID,
-          answer: 'worksheet_generated',
-          is_correct: true,
-          time_taken: 0,
-          difficulty_rating: adaptiveDifficulty
+      try {
+        fetch(`${API}/api/save-chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            teacher_id: TEACHER_ID, tool_name: 'worksheet',
+            topic, grade_level: form.grade_level, subject: form.subject,
+            request_data: payload,
+            response_preview: data.result?.substring(0, 200),
+            response_content: data.result,
+          })
         })
-      }).catch(() => {})
-
-      // Save to chat history
-      fetch(`${API}/api/save-chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teacher_id: TEACHER_ID,
-          tool_name: 'worksheet',
-          topic: form.topic,
-          grade_level: form.grade_level,
-          subject: form.subject,
-          request_data: form,
-          response_preview: data.result?.substring(0, 200) || 'Generated worksheet',
-          response_content: data.result || 'Generated worksheet'
-        })
-      }).catch(e => console.error('Error saving chat:', e))
+      } catch (e) { console.error('Chat save failed:', e) }
     } catch (e) { setErrors(prev => ({ ...prev, general: e.message })) }
-    finally    { setLoading(false) }
+    finally     { setLoading(false) }
   }
 
-  const topicLocked = !form.subject || !form.grade_level
-  const suggestions = topicLocked ? [] : getTopicSuggestions(form.subject, form.grade_level)
-
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'start', height: PAGE_H }}>
+    <div style={{ position: 'relative', height: '100%' }}>
+      {limitError && <ErrorToast message={limitError} duration={5000} onClose={() => setLimitError('')} />}
 
-      {/* ── LEFT PANEL ── */}
-      <div className="card fade-up" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', maxHeight: PAGE_H, padding: 0 }}>
-        <div style={{ padding: '20px 24px', flexShrink: 0, borderBottom: '1.5px solid var(--border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 40, height: 40, background: 'var(--accent-soft)', border: '1.5px solid var(--accent-mid)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#399aff" strokeWidth="1.9" strokeLinecap="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-              </svg>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                Worksheet Generator
-                <UsageCounter ref={usageCounterRef} teacherId={TEACHER_ID} toolName="worksheet" />
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Subject → Grade → Topic → Generate</div>
-            </div>
-            <button onClick={() => setShowHistory(true)} title="View chat history" style={{
-              background: '#399aff', border: 'none', borderRadius: 8,
-              padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              color: 'white', fontSize: '0.85rem', fontWeight: 600, transition: 'all 0.2s'
-            }}>
-              📋 History
-            </button>
-          </div>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'start', height: PAGE_H }}>
 
-        <div style={FORM_BODY}>
-          <div style={{ height: 8 }}/>
-
-          {/* STEP 1 — Subject */}
-          <div className="form-group">
-            <label className="form-label">Subject <span style={{ color: '#ef4444' }}>*</span></label>
-            <select className="form-select" value={form.subject}
-              onChange={e => { set('subject', e.target.value); set('topic', '') }}
-              style={{ borderColor: fieldBorder(errors.subject) }}>
-              <option value="">— Select Subject —</option>
-              {subjects.map(s => <option key={s}>{s}</option>)}
-            </select>
-            <ErrMsg msg={errors.subject} />
-          </div>
-
-          {/* STEP 2 — Grade */}
-          <div className="form-group">
-            <label className="form-label">Grade Level <span style={{ color: '#ef4444' }}>*</span></label>
-            <CustomSelect value={form.grade_level}
-              onChange={e => { set('grade_level', e.target.value); set('topic', '') }}
-              style={{ borderColor: fieldBorder(errors.grade_level) }}>
-              <option value="">— Select Grade —</option>
-              {grades.map(g => <option key={g}>{g}</option>)}
-            </CustomSelect>
-            <ErrMsg msg={errors.grade_level} />
-          </div>
-
-          {/* STEP 3 — Topic dropdown + custom textarea */}
-          <div className="form-group">
-            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Topic <span style={{ color: '#ef4444' }}>*</span></span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-                Voice enabled
-              </span>
-            </label>
-
-            {/* Dropdown */}
-            <select
-              className="form-select"
-              value={suggestions.includes(form.topic) ? form.topic : ''}
-              onChange={e => set('topic', e.target.value)}
-              disabled={topicLocked}
-              style={{ borderColor: fieldBorder(errors.topic), opacity: topicLocked ? 0.5 : 1, marginBottom: 8 }}
-            >
-              <option value="">{topicLocked ? 'Select subject & grade first…' : '— Pick a topic —'}</option>
-              {suggestions.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-
-            {/* Custom textarea with voice */}
-            <div style={{ position: 'relative' }}>
-              <textarea className="form-textarea"
-                placeholder="Or type a custom topic…"
-                value={suggestions.includes(form.topic) ? '' : form.topic}
-                onChange={e => set('topic', e.target.value)}
-                onWheel={lockScroll}
-                disabled={topicLocked}
-                style={{ ...scrollStyle, minHeight: 60, maxHeight: 100, paddingRight: 46, resize: 'vertical',
-                  borderColor: fieldBorder(errors.topic), opacity: topicLocked ? 0.5 : 1 }}/>
-              <VoiceMic onResult={v => set('topic', v)} disabled={topicLocked} />
-            </div>
-            <ErrMsg msg={errors.topic} />
-          </div>
-
-          {/* Worksheet Type */}
-          <div className="form-group">
-            <label className="form-label">Worksheet Type</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {types.map(t => (
-                <button key={t.value} type="button" onClick={() => set('worksheet_type', t.value)} style={{
-                  padding: '9px 8px', borderRadius: 10, fontFamily: 'var(--font)',
-                  border: form.worksheet_type === t.value ? '2px solid var(--accent)' : '1.5px solid var(--border)',
-                  background: form.worksheet_type === t.value ? 'var(--accent-soft)' : 'var(--surface)',
-                  color: form.worksheet_type === t.value ? 'var(--accent)' : 'var(--text-2)',
-                  fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
-                  transition: 'all 0.18s', textAlign: 'center', lineHeight: 1.3,
-                }}>{t.label}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Questions slider */}
-          <div className="form-group">
-            <label className="form-label">Number of Questions</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <input type="range" min={3} max={25} value={form.num_questions}
-                onChange={e => set('num_questions', +e.target.value)}
-                style={{ flex: 1, accentColor: '#399aff' }} />
-              <span style={{ width: 32, textAlign: 'center', fontWeight: 700, color: 'var(--accent)', fontSize: '1rem' }}>
-                {form.num_questions}
-              </span>
-            </div>
-          </div>
-
-          {/* Additional instructions */}
-          <div className="form-group">
-            <label className="form-label">Additional Instructions (optional)</label>
-            <textarea className="form-textarea"
-              placeholder="e.g. Include a word bank, Focus on chapter 3…"
-              value={form.additional_instructions}
-              onChange={e => set('additional_instructions', e.target.value)}
-              onWheel={lockScroll}
-              style={{ ...scrollStyle, minHeight: 60, maxHeight: 100, resize: 'vertical' }}/>
-          </div>
-
-          {/* Upload Teaching Material (RAG) */}
-          <div className="form-group">
-            <label className="form-label">Upload Your Material (optional)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" disabled={materialUploading} onClick={() => materialFileRef.current?.click()}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8,
-                  border: '1.5px solid var(--accent-mid)', background: 'var(--accent-soft)',
-                  color: 'var(--accent)', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}>
-                {materialUploading ? '⏳ Reading…' : '📄 Upload PDF / DOCX / TXT'}
+        {/* ── LEFT PANEL ── */}
+        <div className="card fade-up" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', maxHeight: PAGE_H, padding: 0 }}>
+          <div style={{ padding: '20px 24px', flexShrink: 0, borderBottom: '1.5px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <button onClick={() => setShowHistory(true)} title="Chat History" style={{
+                background: ACCENT, border: 'none', borderRadius: 8,
+                padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                color: 'white', fontSize: '0.85rem', fontWeight: 600, transition: 'all 0.2s'
+              }}>
+                History
               </button>
-              {sourceMaterial && (
-                <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 600 }}>
-                  ✓ {materialName} loaded ({Math.round(sourceMaterial.length / 100) / 10}k chars)
-                </span>
-              )}
-              {sourceMaterial && (
-                <button type="button" onClick={() => { setSourceMaterial(''); setMaterialName('') }}
-                  style={{ fontSize: '0.75rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-                  ✕ Remove
-                </button>
-              )}
             </div>
-            <input ref={materialFileRef} type="file" accept=".pdf,.docx,.txt,.md"
-              style={{ display: 'none' }} onChange={handleMaterialUpload} />
-            {sourceMaterial && (
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
-                AI will base questions on your uploaded material
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 40, height: 40, background: ACCENT_SOFT, border: `1.5px solid ${ACCENT_MID}`, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="1.9" strokeLinecap="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  Worksheet Generator
+                  <UsageCounter ref={usageCounterRef} teacherId={TEACHER_ID} toolName="worksheet" />
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Grade → Subject → Topic → Generate</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={FORM_BODY}>
+            <div style={{ height: 8 }}/>
+
+            {/* STEP 1 — Grade */}
+            <div className="form-group">
+              <label className="form-label">Grade Level <span style={{ color: '#ef4444' }}>*</span></label>
+              <CustomSelect value={form.grade_level} onChange={e => onGradeChange(e.target.value)}
+                style={{ borderColor: errors.grade_level ? '#fca5a5' : ACCENT_MID }}>
+                <option value="">— Select Grade —</option>
+                {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+              </CustomSelect>
+              <ErrMsg msg={errors.grade_level} />
+            </div>
+
+            {/* STEP 2 — Subject (Core/Misc tabs) */}
+            <div className="form-group">
+              <label className="form-label">
+                Subject <span style={{ color: '#ef4444' }}>*</span>
+                {subjectLocked && <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 500, marginLeft: 6 }}>(select a grade first)</span>}
+              </label>
+              <TrackTabs
+                value={subjectTrack}
+                onChange={onSubjectTrackChange}
+                coreCount={coreSubjects.length}
+                miscCount={miscSubjects.length}
+                disabled={subjectLocked}
+              />
+              <CustomSelect value={form.subject} onChange={e => onSubjectChange(e.target.value)}
+                style={{ borderColor: errors.subject ? '#fca5a5' : ACCENT_MID, opacity: subjectLocked ? 0.5 : 1 }}>
+                <option value="">{subjectLocked ? 'Pick grade first…' : (subjectTrack === 'core' ? '— Pick CBSE subject —' : '— Pick miscellaneous subject —')}</option>
+                {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
+              </CustomSelect>
+              {!subjectLocked && subjectTrack === 'core' && coreSubjects.length === 0 && (
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>No CBSE TOC entries for this grade — try the Miscellaneous tab.</div>
+              )}
+              <ErrMsg msg={errors.subject} />
+            </div>
+
+            {/* STEP 3 — Topic (Core/Misc tabs) */}
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Topic <span style={{ color: '#ef4444' }}>*</span></span>
+                <span style={{ fontSize: '0.68rem', color: ACCENT, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                  Voice
+                </span>
+              </label>
+              <TrackTabs
+                value={topicTrack}
+                onChange={onTopicTrackChange}
+                coreCount={coreTopics.length}
+                miscCount={miscTopics.length}
+                disabled={topicLocked}
+              />
+              <CustomSelect value={topicOptions.some(t => t.label === form.topic) ? form.topic : ''}
+                onChange={e => { set('topic', e.target.value); setCustomTopic('') }}
+                style={{ borderColor: errors.topic ? '#fca5a5' : ACCENT_MID, opacity: topicLocked ? 0.5 : 1 }}>
+                <option value="">
+                  {topicLocked ? 'Pick subject first…' :
+                    (topicTrack === 'core'
+                      ? (coreTopics.length === 0 ? 'No CBSE chapters for this subject' : '— Pick NCERT chapter / topic —')
+                      : '— Pick miscellaneous topic —')}
+                </option>
+                {topicOptions.map(t => <option key={t.label} value={t.label}>{t.chapter ? `${t.chapter} — ${t.label}` : t.label}</option>)}
+              </CustomSelect>
+
+              {/* Topic description preview */}
+              {!topicLocked && (() => {
+                const sel = topicOptions.find(t => t.label === form.topic)
+                if (sel && sel.description) {
+                  return (
+                    <div style={{ marginTop: 8, padding: '8px 10px', background: topicTrack === 'core' ? '#ecfdf5' : '#fffbeb',
+                      border: `1px solid ${topicTrack === 'core' ? '#bbf7d0' : '#fcd34d'}`, borderRadius: 8,
+                      fontSize: '0.72rem', color: 'var(--text-2)', lineHeight: 1.5 }}>
+                      <strong style={{ color: topicTrack === 'core' ? '#047857' : '#b45309' }}>
+                        {topicTrack === 'core' ? 'NCERT scope:' : 'Topic scope:'}
+                      </strong> {sel.description}
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              {/* Custom topic textarea */}
+              <div style={{ position: 'relative', marginTop: 8 }}>
+                <textarea className="form-textarea"
+                  placeholder={topicLocked ? '' : 'Or type a custom topic…'}
+                  value={topicOptions.some(t => t.label === form.topic) ? '' : (customTopic || form.topic)}
+                  onChange={e => { setCustomTopic(e.target.value); set('topic', '') }}
+                  onWheel={lockScroll}
+                  disabled={topicLocked}
+                  style={{ ...scrollStyle, minHeight: 56, maxHeight: 90, paddingRight: 46, resize: 'vertical',
+                    borderColor: errors.topic ? '#fca5a5' : ACCENT_MID, opacity: topicLocked ? 0.5 : 1 }}/>
+                <VoiceMic onResult={v => { setCustomTopic(v); set('topic', '') }} disabled={topicLocked} />
+              </div>
+              <ErrMsg msg={errors.topic} />
+            </div>
+
+            {/* Worksheet Type */}
+            <div className="form-group">
+              <label className="form-label">Worksheet Type</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {worksheetTypes.map(t => (
+                  <button key={t.value} type="button" onClick={() => set('worksheet_type', t.value)} style={{
+                    padding: '9px 8px', borderRadius: 10, fontFamily: 'var(--font)',
+                    border: form.worksheet_type === t.value ? `2px solid ${ACCENT}` : '1.5px solid var(--border)',
+                    background: form.worksheet_type === t.value ? ACCENT_SOFT : 'var(--surface)',
+                    color: form.worksheet_type === t.value ? ACCENT : 'var(--text-2)',
+                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                    transition: 'all 0.18s', textAlign: 'center', lineHeight: 1.3,
+                  }}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Number of Questions slider */}
+            <div className="form-group">
+              <label className="form-label">Number of Questions</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <input type="range" min={3} max={25} value={form.num_questions}
+                  onChange={e => set('num_questions', +e.target.value)}
+                  style={{ flex: 1, accentColor: ACCENT }} />
+                <span style={{ width: 32, textAlign: 'center', fontWeight: 700, color: ACCENT, fontSize: '1rem' }}>
+                  {form.num_questions}
+                </span>
+              </div>
+            </div>
+
+            {/* Additional Instructions */}
+            <div className="form-group">
+              <label className="form-label">Additional Instructions (optional)</label>
+              <textarea className="form-textarea"
+                placeholder="e.g. Include a word bank, Focus on chapter 3, Use HOTS questions…"
+                value={form.additional_instructions}
+                onChange={e => set('additional_instructions', e.target.value)}
+                onWheel={lockScroll}
+                style={{ ...scrollStyle, minHeight: 55, maxHeight: 90, resize: 'vertical', borderColor: ACCENT_MID }}/>
+            </div>
+
+            {/* Upload Teaching Material */}
+            <div className="form-group">
+              <label className="form-label">Upload Your Material (optional)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" disabled={materialUploading} onClick={() => materialFileRef.current?.click()}
+                  style={{ display:'flex',alignItems:'center',gap:6,padding:'7px 14px',borderRadius:8,
+                    border:`1.5px solid ${ACCENT_MID}`,background:ACCENT_SOFT,
+                    color:ACCENT,fontSize:'0.82rem',fontWeight:600,cursor:'pointer' }}>
+                  {materialUploading ? 'Reading…' : 'Upload PDF / DOCX / TXT'}
+                </button>
+                {sourceMaterial && <span style={{ fontSize:'0.78rem',color:'#10b981',fontWeight:600 }}>✓ {materialName}</span>}
+                {sourceMaterial && <button type="button" onClick={() => { setSourceMaterial(''); setMaterialName('') }}
+                  style={{ fontSize:'0.75rem',color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:600 }}>✕ Remove</button>}
+              </div>
+              <input ref={materialFileRef} type="file" accept=".pdf,.docx,.txt,.md" style={{ display:'none' }} onChange={handleMaterialUpload} />
+              {sourceMaterial && <div style={{ fontSize:'0.72rem',color:'var(--text-3)',marginTop:4 }}>AI will base questions on your uploaded material</div>}
+            </div>
+
+            {errors.general && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', fontSize: '0.82rem', color: '#dc2626', fontWeight: 500 }}>
+                ⚠ {errors.general}
               </div>
             )}
+
+            <button className="btn btn-primary" onClick={generate} disabled={loading}
+              style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.95rem', marginTop: 4,
+                background: `linear-gradient(135deg,${ACCENT},#1d7fe0)`, boxShadow: `0 4px 14px rgba(57,154,255,0.35)` }}>
+              {loading
+                ? <><div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /> Generating…</>
+                : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Worksheet</>
+              }
+            </button>
+            <div style={{ height: 4 }}/>
           </div>
+        </div>
 
-          {errors.general && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', fontSize: '0.82rem', color: '#dc2626', fontWeight: 500 }}>
-              ⚠ {errors.general}
-            </div>
-          )}
-
-          <button className="btn btn-primary" onClick={generate} disabled={loading}
-            style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.95rem', marginTop: 4 }}>
-            {loading
-              ? <><div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /> Generating…</>
-              : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Worksheet</>
-            }
-          </button>
-          <div style={{ height: 4 }}/>
+        {/* ── RIGHT PANEL ── */}
+        <div style={{ height: PAGE_H, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} className="fade-up-1">
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <OutputBox result={result} loading={loading} toolName="worksheet" onClear={clearResult}
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}
+            />
+          </div>
         </div>
       </div>
 
-      {/* ── RIGHT PANEL ── */}
-      <div style={{ height: PAGE_H, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} className="fade-up-1">
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <OutputBox result={result} loading={loading} toolName="worksheet" onClear={clearResult}
-            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}
-          />
-        </div>
-      </div>
-
-      {/* Chat History Sidebar */}
       <ChatHistory
-        teacherId={TEACHER_ID}
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
+        teacherId={TEACHER_ID}
         onSelectChat={(chat) => {
-          // Load the full chat content and close sidebar
           saveResult(chat.content || chat.preview)
           setShowHistory(false)
         }}
       />
-
-      {/* Error Toast */}
-      {limitError && <ErrorToast message={limitError} duration={5000} onClose={() => setLimitError(null)} />}
     </div>
   )
 }

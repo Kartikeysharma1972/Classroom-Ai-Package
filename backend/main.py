@@ -122,6 +122,21 @@ class LessonPlanRequest(BaseModel):
     include_topic_overview: bool = True
     additional_notes: str = ""
     source_material: str = ""
+    # Optional NCERT/CBSE chapter description for the selected topic.
+    topic_description: str = ""
+    # "core" (CBSE TOC topic) or "miscellaneous" (curated extra topic).
+    topic_track: str = "core"
+
+class LessonPlanEnrichRequest(BaseModel):
+    # The existing lesson plan body (so the model can extend it coherently).
+    existing_plan: str
+    topic: str
+    grade_level: str
+    subject: str
+    duration: str = "45 minutes"
+    topic_description: str = ""
+    # One of: "more_activities", "more_examples", "more_topics"
+    action: str = "more_activities"
 
 class MCAssessmentRequest(BaseModel):
     topic: str
@@ -230,7 +245,7 @@ def get_grade_language_profile(grade_level: str) -> str:
     return "LANGUAGE LEVEL: Use clear, age-appropriate language for the specified grade level."
 
 
-def call_openai(system_prompt: str, user_prompt: str, max_tokens: int = 1800) -> str:
+def call_openai(system_prompt: str, user_prompt: str, max_tokens: int = 4096, temperature: float = 0.5) -> str:
     try:
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -238,7 +253,7 @@ def call_openai(system_prompt: str, user_prompt: str, max_tokens: int = 1800) ->
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            temperature=0.65,
+            temperature=temperature,
             max_tokens=max_tokens,
         )
         return response.choices[0].message.content.strip()
@@ -295,17 +310,55 @@ def generate_worksheet(req: WorksheetRequest):
             f"---\n{req.source_material[:5000]}\n---\n"
         )
 
+    lang_profile = get_grade_language_profile(req.grade_level)
+
+    # Get subject-specific question intelligence
+    subj_lower = (req.subject or '').lower()
+    subject_intelligence = ""
+    if 'math' in subj_lower:
+        subject_intelligence = (
+            "MATH WORKSHEET RULES:\n"
+            "- Every question must require CALCULATION or MATHEMATICAL WORKING\n"
+            "- Include specific numerical values in every problem\n"
+            "- Use word problems with real-world scenarios (not just 'Solve 2+3')\n"
+            "- For higher grades: include proofs, constructions, derivations\n"
+            "- NEVER write 'Define X' or 'What is X' — always ask 'Find', 'Calculate', 'Prove', 'Solve', 'Construct'\n"
+        )
+    elif any(s in subj_lower for s in ['science', 'physics', 'chemistry', 'biology']):
+        subject_intelligence = (
+            "SCIENCE WORKSHEET RULES:\n"
+            "- Include numerical problems with given data and formulas\n"
+            "- Ask diagram-based questions (draw and label, identify parts)\n"
+            "- Include experiment-based questions (procedure, observation, conclusion)\n"
+            "- Use real-world application scenarios, not just textbook recall\n"
+            "- NEVER write generic 'Define X' or 'Explain X' — ask specific mechanism/reasoning questions\n"
+        )
+    elif any(s in subj_lower for s in ['history', 'social', 'geography', 'civics']):
+        subject_intelligence = (
+            "SOCIAL SCIENCE WORKSHEET RULES:\n"
+            "- Include source-based questions with excerpts\n"
+            "- Ask map-based questions for geography\n"
+            "- Focus on cause-effect, analysis, and evaluation — not just dates/names\n"
+            "- Include case study and scenario-based questions\n"
+        )
+
     system_prompt = (
-        "You are an expert classroom teacher and curriculum specialist with 20+ years of experience. "
-        "Create professional, print-ready worksheets that are engaging, pedagogically sound, and appropriately rigorous. "
-        "Ensure questions are clear, unambiguous, and aligned to the specified grade level and Bloom's level. "
-        + ("When source material is provided, derive ALL questions directly from that content. " if req.source_material.strip() else "")
-        + "Write in plain text ONLY — absolutely no markdown, no asterisks, no hashtags, no bold symbols. "
-        "Use CAPITAL LETTERS for section headers and dashes for separators."
+        "You are a senior CBSE/NCERT teacher with 20 years of experience creating worksheets. "
+        "Every question you write is SPECIFIC, requires genuine thinking, and matches the quality "
+        "of actual CBSE board exam questions. You NEVER write lazy questions like 'Define X' or 'What is X'. "
+        "Every question must require calculation, analysis, reasoning, or creative application. "
+        f"{lang_profile} "
+        + ("Derive ALL questions from the provided source material. " if req.source_material.strip() else "")
+        + "Format output with CLEAN MARKDOWN for readability:\n"
+        "- Use # for main title, ## for section headers, ### for sub-sections\n"
+        "- Use **bold** for important terms and labels\n"
+        "- Use numbered lists (1. 2. 3.) for questions\n"
+        "- Use bullet points (- ) for lists\n"
+        "- Use --- for section dividers\n"
     )
 
     user_prompt = (
-        f"Create a complete, professional classroom worksheet for {req.grade_level} students.\n\n"
+        f"Create a PRINT-READY worksheet for {req.grade_level} students.\n\n"
         f"TOPIC: {req.topic}\n"
         f"{'SUBJECT: ' + req.subject if req.subject else ''}\n"
         f"QUESTION TYPE: {q_type}\n"
@@ -314,20 +367,31 @@ def generate_worksheet(req: WorksheetRequest):
         f"BLOOM'S TAXONOMY FOCUS: {blooms}\n"
         f"{word_bank_note}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
-        f"{material_note}\n"
-        "FORMAT REQUIREMENTS (plain text only, no markdown):\n"
-        "- Worksheet title in ALL CAPS\n"
+        f"{material_note}\n\n"
+        f"{subject_intelligence}\n"
+        "QUESTION QUALITY RULES (CRITICAL):\n"
+        "- EVERY question must be a complete, well-formed sentence as it would appear on a printed exam\n"
+        "- Include specific values, measurements, names, dates, or scenarios in EVERY question\n"
+        "- For numerical subjects: at least 50% questions must require step-by-step calculation\n"
+        "- FORBIDDEN: 'Define X', 'What is X', 'List the features of X', 'Explain X in brief'\n"
+        "- Each question must need at least 2-3 lines of working/writing to answer\n\n"
+        "FORMAT:\n"
+        "- Title in ALL CAPS\n"
         "- Name / Date / Class lines\n"
-        f"{'- Word Bank box with all fill-in words listed' if req.include_word_bank else ''}\n"
-        "- Clear, brief instructions for students\n"
-        "- All questions numbered (1. 2. 3. ...)\n"
-        "- Adequate space for student responses\n"
-        "- ANSWER KEY section at bottom with answers numbered to match\n"
-        "- Include a one-sentence rationale for each answer in the key\n\n"
-        "Write ONLY plain text. No **, ##, or any markdown whatsoever."
+        f"{'- Word Bank box listing all fill-in words' if req.include_word_bank else ''}\n"
+        "- Brief student instructions\n"
+        "- Questions numbered 1, 2, 3...\n"
+        "- For MCQ: 4 plausible options (A, B, C, D) — no obviously wrong choices\n"
+        "- For fill-in-blank: use ________ for blanks\n"
+        "- For open-ended: include point values and expected answer length\n\n"
+        "## Answer Key\n"
+        "- Each answer numbered to match\n"
+        "- Include full solution steps for calculation questions\n"
+        "- Include 1-2 sentence explanation for each answer\n\n"
+        "Use proper markdown formatting: # for title, ## for sections, **bold** for key terms, numbered lists for questions, - for bullets."
     )
 
-    result = call_openai(system_prompt, user_prompt)
+    result = call_openai(system_prompt, user_prompt, max_tokens=4096)
     return {"result": result, "tool": "worksheet"}
 
 
@@ -368,61 +432,33 @@ def generate_lesson_plan(req: LessonPlanRequest):
     if not req.topic.strip():
         raise HTTPException(status_code=400, detail="Topic is required.")
 
+    lang_profile = get_grade_language_profile(req.grade_level)
+
     style_map = {
-        "mixed":       "a variety of learning modalities (visual, auditory, and kinesthetic activities combined)",
-        "visual":      "visual learning strategies — diagrams, charts, graphic organizers, color-coding, videos, visual aids",
-        "auditory":    "auditory learning strategies — discussion, verbal explanations, think-pair-share, reading aloud",
-        "kinesthetic": "kinesthetic and hands-on strategies — movement activities, manipulatives, experiments, role-play",
+        "mixed":       "visual + auditory + kinesthetic combined",
+        "visual":      "diagrams, charts, graphic organizers, color-coding, videos",
+        "auditory":    "discussion, verbal explanations, think-pair-share, reading aloud",
+        "kinesthetic": "movement activities, manipulatives, experiments, role-play",
     }
 
     needs_map = {
         "general":       "a general education classroom with diverse learners",
-        "ell":           "English Language Learners — include sentence frames, visual vocabulary, bilingual supports, and simplified instructions",
-        "special_needs": "students with diverse learning needs — include modifications, accommodations, chunked tasks, and extra scaffolding",
-        "gifted":        "gifted and talented students — include enrichment tasks, higher-order questioning, independent projects, and extensions",
+        "ell":           "English Language Learners — sentence frames, visual vocabulary, bilingual supports",
+        "special_needs": "students with diverse learning needs — modifications, accommodations, chunked tasks",
+        "gifted":        "gifted and talented — enrichment tasks, higher-order questioning, independent projects",
     }
 
     tech_map = {
-        "low":         "low-tech environment — paper, pencil, physical manipulatives, whiteboards only",
-        "digital":     "digital tools — presentations, educational websites, online quizzes, Google Docs/Slides, video",
-        "interactive": "interactive/blended technology — interactive whiteboard, simulations, collaborative platforms, educational apps",
+        "low":         "low-tech: paper, pencil, physical manipulatives, whiteboards",
+        "digital":     "digital: presentations, educational websites, online quizzes, Google Docs/Slides",
+        "interactive": "interactive/blended: interactive whiteboard, simulations, collaborative platforms, apps",
     }
 
     class_map = {
         "in-person": "traditional in-person classroom",
-        "remote":    "fully remote/virtual classroom — include video call strategies, breakout rooms, digital submission methods",
-        "hybrid":    "hybrid classroom with both in-person and remote students simultaneously — address both audiences",
+        "remote":    "fully remote/virtual — video call strategies, breakout rooms, digital submission",
+        "hybrid":    "hybrid with both in-person and remote students simultaneously",
     }
-
-    # Generate topic overview if requested
-    topic_overview = ""
-    if req.include_topic_overview:
-        topic_system = (
-            "You are a subject matter expert and experienced educator. "
-            "Provide comprehensive, authoritative, and student-friendly educational content about topics. "
-            "Make content accessible for the specified grade level while maintaining academic rigor. "
-            "Write in plain text ONLY — no markdown, no asterisks, no hashtags."
-        )
-
-        topic_prompt = (
-            f"Create a comprehensive topic overview for teacher reference:\n\n"
-            f"TOPIC: {req.topic}\n"
-            f"SUBJECT: {req.subject}\n"
-            f"GRADE LEVEL: {req.grade_level}\n\n"
-            "Include ALL sections with concise but detailed information:\n\n"
-            "1. OVERVIEW - What this topic is about and why it matters\n\n"
-            "2. KEY CONCEPTS - 5-7 core ideas with simple definitions\n\n"
-            "3. ESSENTIAL VOCABULARY - 8-10 key terms defined in student-friendly language\n\n"
-            "4. MAIN PRINCIPLES - 3-4 key ideas or rules about this topic\n\n"
-            "5. REAL-WORLD EXAMPLES - 3 concrete examples showing how this applies\n\n"
-            "6. INTERESTING FACTS - 3 fascinating or surprising facts\n\n"
-            "7. COMMON MISCONCEPTIONS - 2-3 things students often misunderstand with correct explanations\n\n"
-            f"Make all content age-appropriate for {req.grade_level}. "
-            "Write in plain text. No **, ##, or markdown."
-        )
-
-        topic_overview = call_openai(topic_system, topic_prompt, max_tokens=1500)
-        topic_overview = "=== PAGE 1: TOPIC OVERVIEW ===\n\n" + topic_overview + "\n\n" + "="*50 + "\n\n=== PAGE 2: LESSON PLAN ===\n\n"
 
     lesson_material_note = ""
     if req.source_material.strip():
@@ -431,74 +467,271 @@ def generate_lesson_plan(req: LessonPlanRequest):
             f"---\n{req.source_material[:5000]}\n---\n"
         )
 
+    chapter_context = ""
+    if req.topic_description.strip():
+        track_label = "OFFICIAL CBSE/NCERT CHAPTER" if req.topic_track == "core" else "ENRICHMENT TOPIC"
+        chapter_context = (
+            f"\n{track_label} REFERENCE:\n\"{req.topic_description.strip()}\"\n"
+        )
+
+    additional_notes_instruction = ""
+    if req.additional_notes and req.additional_notes.strip():
+        additional_notes_instruction = (
+            f"\n\nTEACHER'S SPECIAL REQUEST (MUST follow this):\n"
+            f"\"{req.additional_notes.strip()}\"\n"
+            f"Integrate this request throughout the lesson plan. If the teacher asks for "
+            f"example questions at each subtopic, include worked examples under every subtopic. "
+            f"If the teacher asks for specific activities, include those activities.\n"
+        )
+
+    additional_notes_section = ""
+    if req.additional_notes and req.additional_notes.strip():
+        additional_notes_section = (
+            f"\nTEACHER'S SPECIAL REQUEST: {req.additional_notes.strip()}\n"
+            f"You MUST follow this request and integrate it into the lesson plan.\n"
+        )
+
     system_prompt = (
-        "You are a master curriculum designer and instructional coach expert in UbD (Understanding by Design), "
-        "differentiated instruction, and modern pedagogical best practices. "
-        "Create detailed, actionable, classroom-ready lesson plans any teacher can pick up and use immediately. "
-        "Include specific timing estimates, concrete student activities, and teacher facilitation notes. "
-        + ("When source material is provided, align ALL activities and content directly to it. " if req.source_material.strip() else "")
-        + "Write in plain text ONLY — no markdown, no asterisks, no hashtags. "
-        "Use numbered sections with UPPERCASE HEADERS."
+        "You are an expert teacher writing a lesson plan that another teacher can walk into "
+        "class and teach from directly. You always include ACTUAL solved examples with numbers "
+        "and step-by-step working. You never write generic descriptions — you write the real "
+        "content. Format with clean markdown: # for title, ## for section headers, ### for sub-sections, "
+        "**bold** for key terms, numbered lists for steps, - for bullet points, --- for dividers. "
+        f"{lang_profile}"
     )
 
     user_prompt = (
-        f"Create a comprehensive, fully detailed lesson plan:\n\n"
+        f"Write a detailed, classroom-ready lesson plan.\n\n"
+        f"Topic: {req.topic}\n"
+        f"Subject: {req.subject}\n"
+        f"Grade: {req.grade_level}\n"
+        f"Duration: {req.duration}\n"
+        f"{chapter_context}"
+        f"{additional_notes_section}"
+        f"{lesson_material_note}\n"
+        "Follow this EXACT structure. Fill in every section with REAL content.\n\n"
+
+        "---\n\n"
+
+        "LESSON OVERVIEW\n"
+        f"Topic: {req.topic}\n"
+        f"Grade: {req.grade_level} | Subject: {req.subject} | Duration: {req.duration}\n"
+        "Essential Question: [Write one thought-provoking question]\n"
+        "By the end of this lesson, students will be able to:\n"
+        "  1. [First specific skill]\n"
+        "  2. [Second specific skill]\n"
+        "  3. [Third specific skill]\n\n"
+
+        "MATERIALS NEEDED\n"
+        "- [List every item with quantity, e.g., 30 calculators, 15 protractors]\n"
+        "- Textbook: [chapter and page reference if applicable]\n"
+        "- Board setup: [what to draw/write before class starts]\n\n"
+
+        "WARM-UP / HOOK (5 minutes)\n"
+        "Activity: [Describe a specific, engaging opening — a puzzle, challenge, real-world "
+        "scenario, or surprising demo. NOT 'discuss the topic'. Write exactly what the teacher "
+        "does and says.]\n"
+        "Ask students: [Write 2-3 specific questions with expected answers]\n\n"
+
+        "DIRECT INSTRUCTION (15-20 minutes)\n"
+        "Teach the following concepts in order. After EACH concept, include a worked example.\n\n"
+        "Concept 1: [Name and definition]\n"
+        "Write on board: [What to write]\n"
+        "Explain: [What to say to students, 2-3 sentences]\n\n"
+        "  Worked Example 1:\n"
+        "  Question: [Write the actual question with numbers]\n"
+        "  Solution:\n"
+        "    Step 1: [Show the actual calculation]\n"
+        "    Step 2: [Show the next step]\n"
+        "    Step 3: [If needed]\n"
+        "    Answer: [The final answer]\n"
+        "  Ask class: [A quick check question]\n\n"
+        "Concept 2: [Name and definition]\n"
+        "Write on board: [What to write]\n"
+        "Explain: [What to say]\n\n"
+        "  Worked Example 2:\n"
+        "  Question: [Actual question]\n"
+        "  Solution:\n"
+        "    Step 1: [Actual work]\n"
+        "    Step 2: [Actual work]\n"
+        "    Answer: [Answer]\n"
+        "  Ask class: [Check question]\n\n"
+        "Concept 3: [Name and definition]\n\n"
+        "  Worked Example 3:\n"
+        "  Question: [Actual question]\n"
+        "  Solution: [Full step-by-step]\n"
+        "  Answer: [Answer]\n\n"
+        "[Continue for all key concepts in the topic. Include at least 3-4 worked examples total.]\n\n"
+
+        "GUIDED PRACTICE ACTIVITY (10-15 minutes)\n"
+        "Activity Name: [Give it a fun, creative name like 'Trig Relay Race' or 'Equation "
+        "Scavenger Hunt']\n"
+        "How it works:\n"
+        "  Step 1: [Exact instruction]\n"
+        "  Step 2: [Exact instruction]\n"
+        "  Step 3: [Exact instruction]\n"
+        "Group size: [e.g., pairs or groups of 4]\n"
+        "Questions for the activity:\n"
+        "  Q1: [Actual question] -- Answer: [answer]\n"
+        "  Q2: [Actual question] -- Answer: [answer]\n"
+        "  Q3: [Actual question] -- Answer: [answer]\n"
+        "  Q4: [Actual question] -- Answer: [answer]\n"
+        "Teacher tip: [What mistakes to watch for]\n\n"
+
+        "INDEPENDENT PRACTICE (10 minutes)\n"
+        "Students solve these on their own:\n"
+        "  Easy:\n"
+        "    1. [Question] -- Answer: [answer]\n"
+        "    2. [Question] -- Answer: [answer]\n"
+        "  Medium:\n"
+        "    3. [Question] -- Answer: [answer]\n"
+        "    4. [Question] -- Answer: [answer]\n"
+        "  Challenging:\n"
+        "    5. [Question] -- Answer: [answer]\n"
+        "    6. [Question] -- Answer: [answer]\n\n"
+
+        "EXIT TICKET (5 minutes)\n"
+        "Students answer on a slip of paper before leaving:\n"
+        "  1. [Specific question] -- Expected answer: [answer]\n"
+        "  2. [Specific question] -- Expected answer: [answer]\n\n"
+
+        "DIFFERENTIATION\n"
+        "For struggling learners:\n"
+        "  - [Specific scaffold or simpler version of a problem]\n"
+        "  - [Another support strategy]\n"
+        "For advanced students:\n"
+        "  - Challenge: [A harder problem that extends the concept]\n"
+        "  - Extension: [An open-ended exploration task]\n\n"
+
+        "HOMEWORK (4-5 problems)\n"
+        "  1. [Easy] [Question] -- Answer: [answer]\n"
+        "  2. [Easy] [Question] -- Answer: [answer]\n"
+        "  3. [Medium] [Question] -- Answer: [answer]\n"
+        "  4. [Hard] [Question] -- Answer: [answer]\n"
+        "  5. [Hard] [Question] -- Answer: [answer]\n\n"
+
+        "TEACHER NOTES\n"
+        "- Common mistakes: [2-3 specific mistakes students make on this topic]\n"
+        "- Time adjustment: [What to cut if running short, what to extend if time remains]\n"
+        "- Next lesson: [What comes next and how this connects]\n\n"
+
+        "IMPORTANT: Replace every [bracket] with ACTUAL content. Write real questions with "
+        "real numbers and real solutions. Do not leave any brackets or placeholders.\n\n"
+        "FORMAT with clean markdown: use ## for each major section header (e.g., ## Lesson Overview, ## Warm-Up / Hook), "
+        "### for sub-sections, **bold** for key terms and labels, numbered lists for steps and questions, "
+        "- for bullet points, --- for section dividers."
+    )
+
+    # Use higher token limit for detailed, example-rich output
+    lesson_result = call_openai(system_prompt, user_prompt, max_tokens=6000, temperature=0.4)
+
+    # Generate topic overview only if requested (as a separate quick-reference page)
+    if req.include_topic_overview:
+        topic_system = (
+            "You are a subject matter expert. Create a concise teacher quick-reference sheet. "
+            f"{lang_profile} "
+            "Format with clean markdown: ## for section headers, **bold** for key terms, - for bullet lists."
+        )
+
+        topic_prompt = (
+            f"Create a 1-page QUICK REFERENCE SHEET for a teacher about to teach this topic:\n\n"
+            f"TOPIC: {req.topic}\nSUBJECT: {req.subject}\nGRADE LEVEL: {req.grade_level}\n\n"
+            "Include these sections (keep each section concise and useful):\n\n"
+            "WHAT THIS TOPIC IS: 2-3 sentence summary of the topic and why students learn it\n\n"
+            "KEY FORMULAS / RULES: List all important formulas, theorems, or rules with notation\n\n"
+            "ESSENTIAL VOCABULARY: 6-8 key terms with one-line definitions\n\n"
+            "COMMON STUDENT MISTAKES: 3-4 specific mistakes students make and how to correct them\n\n"
+            "REAL-WORLD CONNECTIONS: 3 specific examples of where this topic appears in real life\n\n"
+            "PREREQUISITE CHECK: What students should already know before this lesson\n\n"
+            "Use ## for section headers, **bold** for terms, - for bullet points."
+        )
+
+        topic_overview = call_openai(topic_system, topic_prompt, max_tokens=1500, temperature=0.3)
+        result = (
+            "=== TEACHER QUICK REFERENCE ===\n\n"
+            + topic_overview
+            + "\n\n" + "=" * 50 + "\n\n"
+            + "=== LESSON PLAN ===\n\n"
+            + lesson_result
+        )
+    else:
+        result = lesson_result
+
+    return {"result": result, "tool": "lesson-plan"}
+
+
+@app.post("/api/lesson-plan/enrich")
+def enrich_lesson_plan(req: LessonPlanEnrichRequest):
+    if not req.existing_plan.strip():
+        raise HTTPException(status_code=400, detail="Existing plan is required.")
+    if not req.topic.strip():
+        raise HTTPException(status_code=400, detail="Topic is required.")
+
+    action_map = {
+        "more_activities": {
+            "title": "ADDITIONAL CLASSROOM ACTIVITIES",
+            "instruction": (
+                "Generate 4-5 NEW, distinct in-class activities for this lesson that are NOT "
+                "already in the existing plan. For each activity include: a clear name, time "
+                "estimate, materials needed, step-by-step teacher instructions, student grouping, "
+                "and the learning outcome. Mix kinesthetic, collaborative, discussion-based, and "
+                "creative formats. Keep them NCERT/CBSE classroom appropriate."
+            ),
+        },
+        "more_examples": {
+            "title": "ADDITIONAL NCERT-STYLE EXAMPLE QUESTIONS WITH SOLUTIONS",
+            "instruction": (
+                "Generate 6-8 ADDITIONAL example questions in NCERT textbook style for the topics "
+                "explained in the existing lesson plan. Do NOT repeat any question already shown "
+                "above. Cover a range: 2 easy, 3 medium, 2 HOTS (Higher Order Thinking Skills). "
+                "For each: state the question, show every solution step with intermediate "
+                "reasoning, and end with the final answer. Use the exact tone, notation, and "
+                "structure of solved examples in NCERT books for this grade."
+            ),
+        },
+        "more_topics": {
+            "title": "ADDITIONAL SUBTOPICS & RELATED TOPICS TO COVER",
+            "instruction": (
+                "Suggest 5-7 ADDITIONAL subtopics and closely related topics the teacher can "
+                "cover to deepen understanding of the main topic. For each subtopic include: "
+                "a 1-line description, 2-3 key concepts inside it, suggested time to cover, "
+                "1 fully solved NCERT-style example question, and a quick practice question with "
+                "answer. Order from foundational to advanced."
+            ),
+        },
+    }
+
+    spec = action_map.get(req.action)
+    if not spec:
+        raise HTTPException(status_code=400, detail="Unknown action.")
+
+    chapter_context = (
+        f"\nNCERT CHAPTER REFERENCE: \"{req.topic_description.strip()}\"\n"
+        if req.topic_description.strip() else ""
+    )
+
+    system_prompt = (
+        "You are a senior NCERT-aligned teacher and curriculum designer. "
+        "Extend an existing lesson plan with new, non-overlapping, classroom-ready content. "
+        "Format with markdown: ## for section headers, ### for sub-sections, **bold** for key terms, "
+        "numbered lists for questions, - for bullets. Model all questions and solutions on NCERT textbook style."
+    )
+
+    user_prompt = (
+        f"Existing lesson plan (for reference — do not repeat its content):\n"
+        f"---\n{req.existing_plan[:6000]}\n---\n\n"
         f"TOPIC: {req.topic}\n"
         f"SUBJECT: {req.subject}\n"
         f"GRADE LEVEL: {req.grade_level}\n"
         f"DURATION: {req.duration}\n"
-        f"CLASS FORMAT: {class_map.get(req.class_type, class_map['in-person'])}\n"
-        f"LEARNING STYLE FOCUS: {style_map.get(req.learning_style, style_map['mixed'])}\n"
-        f"STUDENT NEEDS: {needs_map.get(req.student_needs, needs_map['general'])}\n"
-        f"TECHNOLOGY: {tech_map.get(req.tech_integration, tech_map['low'])}\n"
-        f"{'LEARNING OBJECTIVES: ' + req.objectives if req.objectives else ''}\n"
-        f"{'STANDARDS: ' + req.standards if req.standards else ''}\n"
-        f"{'ADDITIONAL NOTES: ' + req.additional_notes if req.additional_notes else ''}\n\n"
-        "Include ALL sections below with detailed, specific content:\n\n"
-        "1. LESSON OVERVIEW\n"
-        "   - Lesson summary (2-3 sentences)\n"
-        "   - Essential question students will explore\n"
-        "   - Learning objectives in SWBAT format (Students Will Be Able To...)\n"
-        "   - Success criteria (what mastery looks like)\n\n"
-        "2. MATERIALS AND RESOURCES\n"
-        "   - All materials with quantities\n"
-        "   - Technology or tools required\n"
-        "   - Teacher preparation steps\n\n"
-        "3. WARM-UP / HOOK (with time estimate)\n"
-        "   - Engaging activity to activate prior knowledge\n"
-        "   - Real-world connection or student interest hook\n"
-        "   - Key discussion questions to ask\n\n"
-        "4. DIRECT INSTRUCTION (with time estimate)\n"
-        "   - Step-by-step teaching sequence\n"
-        "   - Key vocabulary with simple definitions\n"
-        "   - Teacher talking points and examples\n"
-        "   - Checks for understanding during instruction\n\n"
-        "5. GUIDED PRACTICE (with time estimate)\n"
-        "   - Whole-class or small group activity description\n"
-        "   - Student grouping suggestions\n"
-        "   - Teacher facilitation notes\n\n"
-        "6. INDEPENDENT PRACTICE (with time estimate)\n"
-        "   - Individual student task\n"
-        "   - What teacher observes and monitors\n\n"
-        "7. CLOSURE AND FORMATIVE ASSESSMENT\n"
-        "   - Exit ticket or closing activity\n"
-        "   - How teacher assesses understanding before next lesson\n\n"
-        "8. DIFFERENTIATION STRATEGIES\n"
-        "   - Modifications for struggling learners\n"
-        "   - Extensions for advanced students\n"
-        f"   - Specific accommodations for: {needs_map.get(req.student_needs, 'all learners')}\n\n"
-        "9. HOMEWORK / EXTENSION (if applicable)\n\n"
-        "10. TEACHER REFLECTION NOTES\n"
-        "    - Potential challenges and how to address them\n"
-        "    - What to look for during the lesson\n"
-        "    - Ideas for the follow-up lesson\n\n"
-        "Write everything in plain text. No **, ##, or markdown formatting of any kind."
-        f"{lesson_material_note}"
+        f"{chapter_context}\n"
+        f"Produce a single section titled:\n{spec['title']}\n\n"
+        f"{spec['instruction']}\n\n"
+        "Output ONLY this new section with clean markdown formatting."
     )
 
-    lesson_result = call_openai(system_prompt, user_prompt, max_tokens=2000)
-    result = topic_overview + lesson_result
-    return {"result": result, "tool": "lesson-plan"}
+    addition = call_openai(system_prompt, user_prompt, max_tokens=1800)
+    return {"result": addition, "tool": "lesson-plan", "action": req.action}
 
 
 @app.post("/api/mc-assessment")
@@ -546,14 +779,17 @@ def generate_mc_assessment(req: MCAssessmentRequest):
             f"---\n{req.source_material[:5000]}\n---\n"
         )
 
+    lang_profile = get_grade_language_profile(req.grade_level)
+
     system_prompt = (
-        "You are an expert assessment designer with deep knowledge of curriculum standards, "
-        "Bloom's Taxonomy, and best practices in test construction. "
-        "Create high-quality, fair, and valid assessments. "
-        "All distractors (wrong answers) must be plausible but clearly incorrect to students who mastered the material. "
-        "Avoid trick questions, double negatives, and 'all of the above' options. "
-        + ("When source material is provided, ALL questions must come directly from that content. " if req.source_material.strip() else "")
-        + "Write in plain text ONLY — no markdown, no asterisks, no hashtags."
+        "You are an expert assessment designer. Create rigorous, fair assessments with "
+        "SPECIFIC, SCENARIO-BASED questions — not generic recall questions. "
+        "Every distractor must be plausible (common student mistakes). "
+        "No trick questions, no double negatives, no 'all of the above'. "
+        f"{lang_profile} "
+        + ("ALL questions must come directly from the provided source material. " if req.source_material.strip() else "")
+        + "Format with clean markdown: # for title, ## for sections, **bold** for key terms, "
+        "numbered lists for questions, - for bullet points."
     )
 
     user_prompt = (
@@ -561,24 +797,29 @@ def generate_mc_assessment(req: MCAssessmentRequest):
         f"GRADE LEVEL: {req.grade_level}\n"
         f"{'SUBJECT: ' + req.subject if req.subject else ''}\n"
         f"DIFFICULTY: {diff_desc.get(req.difficulty, diff_desc['medium'])}\n"
-        f"BLOOM'S TAXONOMY FOCUS: {blooms_map.get(req.blooms_level, blooms_map['mixed'])}\n"
-        f"QUESTION FORMAT: {format_map.get(req.question_format, format_map['pure_mc'])}\n"
+        f"BLOOM'S TAXONOMY: {blooms_map.get(req.blooms_level, blooms_map['mixed'])}\n"
+        f"FORMAT: {format_map.get(req.question_format, format_map['pure_mc'])}\n"
         f"{'STANDARDS: ' + req.standards if req.standards else ''}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
         f"{mc_material_note}\n"
-        "FORMAT REQUIREMENTS (plain text only):\n"
-        "- Assessment title in ALL CAPS\n"
+        "FORMAT:\n"
+        "- Title in ALL CAPS with topic and grade\n"
         "- Name / Date / Score fields\n"
-        "- Brief student instructions\n"
-        "- All questions numbered consecutively\n"
-        "- Options clearly labeled A, B, C, D for MC questions\n"
-        "- True / False clearly labeled for T/F questions\n"
-        "- Writing lines for short answer questions\n\n"
-        f"ANSWER KEY: {answer_key_note}\n\n"
-        "Write everything in plain text. No **, ##, or any markdown."
+        "- Brief student instructions (time allowed, marking scheme)\n"
+        "- Questions numbered consecutively\n"
+        "- MC options labeled A, B, C, D\n\n"
+        "QUESTION QUALITY RULES:\n"
+        "- Use real-world scenarios and applied problems (e.g., 'A ladder leans against a wall "
+        "at 60 degrees...' not 'What is the sine of an angle?')\n"
+        "- Include diagram descriptions where helpful (e.g., 'In the figure, triangle ABC has...')\n"
+        "- Mix question types: some conceptual, some calculation-based, some application\n"
+        "- Each wrong option should represent a COMMON STUDENT MISTAKE\n\n"
+        f"ANSWER KEY: {answer_key_note}\n"
+        "For calculation questions, show the working in the answer key.\n\n"
+        "Use markdown: # for title, ## for sections, **bold** for important terms, numbered lists for questions."
     )
 
-    result = call_openai(system_prompt, user_prompt, max_tokens=1800)
+    result = call_openai(system_prompt, user_prompt, max_tokens=4096)
     return {"result": result, "tool": "mc-assessment"}
 
 
@@ -610,8 +851,8 @@ def auto_generate(req: AutoGenerateRequest):
         f"You are an expert classroom teacher creating a worksheet for {req.grade_level} students. "
         f"{lang} "
         + ("Base all questions on the provided source material. " if req.source_material.strip() else "")
-        + "Write in plain text ONLY — no markdown, no asterisks, no hashtags. "
-        "Use CAPITAL LETTERS for section headers."
+        + "Format with markdown: # for title, ## for sections, **bold** for key terms, "
+        "numbered lists for questions, - for bullets."
     )
     ws_user = (
         f"Create a complete classroom worksheet for {req.grade_level} students.\n\n"
@@ -619,16 +860,16 @@ def auto_generate(req: AutoGenerateRequest):
         f"QUESTION TYPE: {type_map.get(req.worksheet_type, type_map['mixed'])}\n"
         f"NUMBER OF QUESTIONS: {req.num_questions}\n"
         f"{auto_material_note}\n"
-        "Include: worksheet title in ALL CAPS, Name/Date/Class lines, student instructions, "
-        "numbered questions, and an ANSWER KEY at the bottom with rationales.\n"
-        "Plain text only. No **, ##, or any markdown."
+        "Include: # worksheet title, Name/Date/Class lines, student instructions, "
+        "numbered questions, and ## Answer Key at the bottom with rationales.\n"
+        "Use markdown: # title, ## sections, **bold**, numbered lists, - bullets."
     )
 
     # ── Topic Overview (Page 1 — teacher reference) ────
     ov_system = (
         f"You are a subject matter expert and experienced educator writing a teacher reference guide. "
         f"{lang} "
-        "Write in plain text ONLY — no markdown, no asterisks, no hashtags."
+        "Format with markdown: ## for section headers, **bold** for key terms, - for bullet lists."
     )
     ov_user = (
         f"Create a comprehensive topic overview for teacher reference:\n\n"
@@ -642,25 +883,35 @@ def auto_generate(req: AutoGenerateRequest):
         "6. INTERESTING FACTS - 3 fascinating or surprising facts to engage students\n\n"
         "7. COMMON MISCONCEPTIONS - 2-3 things students often misunderstand with correct explanations\n\n"
         f"Write everything at the correct complexity for {req.grade_level} students. "
-        "Plain text only. No **, ##, or any markdown."
+        "Use markdown: ## for sections, **bold** for terms, - for bullets."
     )
 
     # ── Lesson Plan (Page 2 — teaching instructions) ───
     lp_system = (
         f"You are a master curriculum designer creating a lesson plan for {req.grade_level} students. "
         f"{lang} "
-        "Write in plain text ONLY — no markdown, no asterisks. "
-        "Use numbered sections with UPPERCASE HEADERS."
+        "Include ACTUAL worked examples with step-by-step solutions and SPECIFIC creative activities. "
+        "Never write vague instructions like 'provide examples' — write the actual examples. "
+        "Format with markdown: ## for section headers, ### for sub-sections, **bold** for key terms, "
+        "numbered lists for steps, - for bullet points, --- for dividers."
     )
     lp_user = (
-        f"Create a complete 45-minute lesson plan:\n\n"
+        f"Create a DETAILED 45-minute lesson plan with REAL teaching content:\n\n"
         f"TOPIC: {req.topic}\nSUBJECT: {req.subject}\nGRADE LEVEL: {req.grade_level}\n\n"
-        "Include: 1. LESSON OVERVIEW (objectives in SWBAT format, essential question, success criteria) "
-        "2. MATERIALS AND RESOURCES 3. WARM-UP/HOOK (10 min) 4. DIRECT INSTRUCTION (15 min) "
-        "5. GUIDED PRACTICE (10 min) 6. INDEPENDENT PRACTICE (7 min) "
-        "7. CLOSURE & FORMATIVE ASSESSMENT (3 min) 8. DIFFERENTIATION STRATEGIES "
-        "(modifications for struggling learners, extensions for advanced students).\n"
-        "Plain text only. No **, ##, or any markdown."
+        "Include ALL sections with ACTUAL content (not placeholders):\n"
+        "1. LESSON OVERVIEW (SWBAT objectives, essential question, success criteria)\n"
+        "2. MATERIALS AND RESOURCES (with quantities)\n"
+        "3. WARM-UP/HOOK (5 min) - a SPECIFIC engaging activity, puzzle, or real-world challenge\n"
+        "4. DIRECT INSTRUCTION (15 min) - step-by-step teaching script with 2-3 WORKED EXAMPLES "
+        "showing full solutions\n"
+        "5. GUIDED PRACTICE (10 min) - a NAMED creative activity (e.g., 'Equation Relay Race') "
+        "with 3-4 actual practice questions and solutions\n"
+        "6. INDEPENDENT PRACTICE (10 min) - 4-5 actual problems with answer key\n"
+        "7. EXIT TICKET (5 min) - 2 specific questions with expected answers\n"
+        "8. DIFFERENTIATION - simpler problems for struggling learners, challenge problems for advanced\n\n"
+        "CRITICAL: Write REAL questions, REAL solutions, REAL activities. "
+        "A teacher must be able to teach directly from this.\n"
+        "Use markdown: ## for sections, ### for sub-sections, **bold** for key terms, numbered lists, - for bullets."
     )
 
     # ── MC Assessment ──────────────────────────────────
@@ -674,7 +925,7 @@ def auto_generate(req: AutoGenerateRequest):
     mc_system = (
         f"You are an expert assessment designer creating a quiz for {req.grade_level} students. "
         f"{lang} "
-        "Write in plain text ONLY — no markdown, no asterisks. "
+        "Format with markdown: # for title, ## for sections, **bold** for key terms, numbered lists for questions. "
         "All wrong answer choices must be plausible but clearly incorrect to students who studied."
     )
     mc_user = (
@@ -683,15 +934,15 @@ def auto_generate(req: AutoGenerateRequest):
         f"FORMAT: {format_map.get(req.mc_format, format_map['pure_mc'])}\n"
         f"{auto_material_note}\n"
         "Include: title in ALL CAPS, Name/Date/Score fields, student instructions, "
-        "numbered questions, and ANSWER KEY with one-sentence explanations per answer.\n"
-        "Plain text only. No **, ##, or any markdown."
+        "numbered questions, and ## Answer Key with one-sentence explanations per answer.\n"
+        "Use markdown: # title, ## sections, **bold**, numbered lists, - bullets."
     )
 
     # ── Run sequentially to stay within Groq free-tier rate limits ────────────
-    topic_overview = call_openai(ov_system, ov_user, 800)
-    lesson_content = call_openai(lp_system, lp_user, 900)
-    worksheet      = call_openai(ws_system, ws_user, 800)
-    mc_assessment  = call_openai(mc_system, mc_user, 800)
+    topic_overview = call_openai(ov_system, ov_user, 1200, temperature=0.3)
+    lesson_content = call_openai(lp_system, lp_user, 3000, temperature=0.4)
+    worksheet      = call_openai(ws_system, ws_user, 2000, temperature=0.4)
+    mc_assessment  = call_openai(mc_system, mc_user, 2000, temperature=0.4)
 
     # Combine overview + lesson plan (matching the Lesson Plan Generator format)
     lesson_plan = (
@@ -750,19 +1001,64 @@ def generate_class_activity(req: ClassActivityRequest):
             f"---\n{req.source_material[:5000]}\n---\n"
         )
 
+    # Subject-specific activity intelligence
+    subj_lower = (req.subject or '').lower()
+    subject_activity_hints = ""
+    if 'math' in subj_lower:
+        subject_activity_hints = (
+            "MATH ACTIVITY INTELLIGENCE:\n"
+            "- Include hands-on manipulatives (paper folding for geometry, blocks for fractions, etc.)\n"
+            "- Design activities where students DISCOVER mathematical concepts through exploration\n"
+            "- Include real measurement tasks (measure classroom objects, calculate areas)\n"
+            "- Use math puzzles, pattern recognition, and logical reasoning games\n"
+            "- For higher grades: include real-world modeling (budgeting, statistics from surveys)\n"
+        )
+    elif any(s in subj_lower for s in ['science', 'physics', 'chemistry', 'biology']):
+        subject_activity_hints = (
+            "SCIENCE ACTIVITY INTELLIGENCE:\n"
+            "- Design actual experiments students can perform with available materials\n"
+            "- Include hypothesis → procedure → observation → conclusion format\n"
+            "- Use inquiry-based learning where students discover concepts\n"
+            "- Include field observation activities (plant growth, weather tracking)\n"
+            "- For chemistry/physics: include safe demonstrations with household items\n"
+        )
+    elif 'english' in subj_lower:
+        subject_activity_hints = (
+            "ENGLISH ACTIVITY INTELLIGENCE:\n"
+            "- Include role-play, dramatization, and reader's theater\n"
+            "- Design collaborative writing exercises (story relay, group essay)\n"
+            "- Include debate and structured discussion formats\n"
+            "- Use creative activities (poetry slam, comic strip creation, news broadcast)\n"
+        )
+    elif any(s in subj_lower for s in ['history', 'social', 'geography', 'civics']):
+        subject_activity_hints = (
+            "SOCIAL SCIENCE ACTIVITY INTELLIGENCE:\n"
+            "- Include map-making and geographical modeling activities\n"
+            "- Design timeline creation and historical reenactment activities\n"
+            "- Use case studies from current events connected to topics\n"
+            "- Include mock parliament, mock court, or community planning exercises\n"
+        )
+
     system_prompt = (
-        "You are an experienced instructional designer and classroom teacher specializing in "
-        "active learning strategies and collaborative pedagogy. "
-        "Create engaging, well-structured classroom activities that maximize student participation "
-        "and are directly mapped to specific learning outcomes. "
+        "You are a master teacher and CBSE-trained instructional designer with expertise in "
+        "active learning, NEP 2020 pedagogy, and experiential education. "
+        "You create activities that are SPECIFIC, ACTIONABLE, and directly tied to curriculum outcomes. "
+        "Every activity you design has been tested in real Indian classrooms and works with commonly available materials. "
+        "You never write vague activities — every step is detailed, timed, and has clear student roles. "
         f"{lang} "
         + ("When source material is provided, align ALL activities directly to that content. " if req.source_material.strip() else "")
-        + "Write in plain text ONLY — no markdown, no asterisks, no hashtags. "
-        "Use CAPITAL LETTERS for section headers and dashes for separators."
+        + "Format output with CLEAN MARKDOWN for beautiful readability:\n"
+        "- Use # for activity number (e.g., # Activity 1: Shape Scavenger Hunt)\n"
+        "- Use ## for section headers (e.g., ## Learning Outcomes, ## Materials Needed, ## Procedure)\n"
+        "- Use ### for sub-sections\n"
+        "- Use **bold** for important labels, terms, and student roles\n"
+        "- Use numbered lists (1. 2. 3.) for steps and procedures\n"
+        "- Use bullet points (- ) for materials, outcomes, and reflection questions\n"
+        "- Use --- between activities as dividers\n"
     )
 
     user_prompt = (
-        f"Create {req.num_activities} detailed classroom activities for {req.grade_level} students.\n\n"
+        f"Create {req.num_activities} detailed, classroom-tested activities for {req.grade_level} students.\n\n"
         f"TOPIC: {req.topic}\n"
         f"{'SUBJECT: ' + req.subject if req.subject else ''}\n"
         f"ACTIVITY TYPE: {activity_map.get(req.activity_type, activity_map['mixed'])}\n"
@@ -771,24 +1067,39 @@ def generate_class_activity(req: ClassActivityRequest):
         f"{'LEARNING OUTCOMES TO ADDRESS: ' + req.learning_outcomes if req.learning_outcomes else ''}\n"
         f"{'MATERIALS AVAILABLE: ' + req.materials_available if req.materials_available else ''}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
-        f"{material_note}\n"
+        f"{material_note}\n\n"
+        f"{subject_activity_hints}\n"
+        "ACTIVITY QUALITY RULES (CRITICAL):\n"
+        "- Every activity must be SPECIFIC to the topic — not a generic 'discuss in groups' activity\n"
+        "- Include exact materials with quantities (e.g., '4 chart papers, 12 colored markers, 1 protractor per group')\n"
+        "- Time every sub-step (e.g., 'Step 1: Distribute materials (2 min), Step 2: Explain task (3 min)')\n"
+        "- Define clear student roles within groups (recorder, presenter, material manager, etc.)\n"
+        "- Include a specific assessment rubric or checklist for each activity\n\n"
         "FOR EACH ACTIVITY, INCLUDE ALL OF THE FOLLOWING:\n\n"
-        "1. ACTIVITY TITLE - Creative, engaging name\n"
-        "2. LEARNING OUTCOMES - 2-3 specific outcomes this activity addresses (use SWBAT format)\n"
-        "3. MATERIALS NEEDED - Complete list with quantities\n"
-        "4. SETUP INSTRUCTIONS - Step-by-step teacher preparation\n"
-        "5. ACTIVITY PROCEDURE - Detailed step-by-step instructions with time estimates\n"
-        "   - Introduction/hook (2-3 min)\n"
-        "   - Main activity steps\n"
+        "1. ACTIVITY TITLE - Creative, engaging name that hints at the concept\n"
+        "2. LEARNING OUTCOMES - 2-3 specific SWBAT outcomes aligned to NCERT/CBSE\n"
+        "3. MATERIALS NEEDED - Complete list with exact quantities per group\n"
+        "4. TEACHER PREPARATION - What to prepare BEFORE class (5-10 min)\n"
+        "5. ACTIVITY PROCEDURE - Minute-by-minute breakdown:\n"
+        "   - Hook/Introduction (2-3 min) — specific opening question or demonstration\n"
+        "   - Main activity steps (numbered, timed)\n"
         "   - Student roles within groups\n"
+        "   - Expected student output/deliverable\n"
         "6. DIFFERENTIATION\n"
-        "   - Scaffolding for struggling learners\n"
-        "   - Extension for advanced students\n"
-        "7. ASSESSMENT - How to evaluate student learning during/after the activity\n"
-        "8. REFLECTION QUESTIONS - 2-3 debrief questions for class discussion\n\n"
-        "Make each activity unique and progressively more challenging. "
-        "Ensure activities promote critical thinking, collaboration, and creativity. "
-        "Write everything in plain text. No **, ##, or any markdown."
+        "   - Scaffolding: specific support for struggling learners\n"
+        "   - Extension: challenge task for advanced students\n"
+        "7. ASSESSMENT - Specific rubric or checklist (not just 'observe students')\n"
+        "8. REFLECTION QUESTIONS - 2-3 thought-provoking debrief questions\n\n"
+        "Make each activity UNIQUE and progressively more challenging. "
+        "Activities must be practical for Indian schools with standard resources.\n\n"
+        "FORMATTING (CRITICAL):\n"
+        "Use clean markdown throughout:\n"
+        "- # Activity 1: [Title] for each activity heading\n"
+        "- ## for section headers within each activity\n"
+        "- **bold** for key labels and student roles\n"
+        "- Numbered lists for procedure steps\n"
+        "- Bullet points (- ) for materials, outcomes, questions\n"
+        "- --- between activities"
     )
 
     result = call_openai(system_prompt, user_prompt, max_tokens=2000)
@@ -1251,7 +1562,7 @@ async def get_teacher_insights(data: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ─── INTERACTIVE QUIZ GENERATOR ────────────────────────
+# ─── INTERACTIVE QUIZ GENERATOR (v2) ──────────────────
 
 class QuizRequest(BaseModel):
     topic: str
@@ -1259,51 +1570,360 @@ class QuizRequest(BaseModel):
     subject: str = ""
     num_questions: int = 5
     difficulty: str = "medium"
+    question_category: str = "ncert"          # ncert | miscellaneous | advanced
+    question_type: str = "mcq"                # mcq | subjective | mix
+    paper_mode: bool = False
+    topic_description: str = ""
+    topic_track: str = "core"                 # core | misc
+
+
+def _get_subject_question_patterns(subject: str, qtype: str) -> str:
+    """Return subject-specific question pattern guidance so the AI generates real exam-quality questions."""
+    subj = subject.lower()
+
+    if 'math' in subj:
+        if qtype == 'subjective' or qtype == 'mix':
+            return (
+                "MATHEMATICS SUBJECTIVE QUESTION PATTERNS (MANDATORY — follow these patterns):\n"
+                "You MUST generate questions from these categories. Mix them across the set:\n"
+                "  1. PROVE / SHOW THAT: Theorem proofs, geometric proofs, algebraic identities\n"
+                "     Example pattern: 'Prove that the tangent at any point of a circle is perpendicular to the radius through the point of contact.'\n"
+                "  2. FIND / CALCULATE: Numerical problems with given values, requiring step-by-step calculation\n"
+                "     Example pattern: 'In a circle with center O, a tangent PT touches the circle at T. If OT = 6 cm and OP = 10 cm, find the length of PT.'\n"
+                "  3. CONSTRUCT / DRAW: Geometric constructions with specific measurements\n"
+                "     Example pattern: 'Draw a circle of radius 4 cm. From a point 7 cm from its center, construct the pair of tangents to the circle.'\n"
+                "  4. APPLICATION / WORD PROBLEM: Real scenario requiring mathematical modeling\n"
+                "     Example pattern: 'Two concentric circles are of radii 5 cm and 9 cm. Find the length of the chord of the larger circle which touches the smaller circle.'\n"
+                "  5. PROVE WITH CONDITIONS: Problems with given figure/conditions to prove a relationship\n"
+                "     Example pattern: 'From an external point P, two tangents PA and PB are drawn to a circle with center O. Prove that PA = PB.'\n\n"
+                "CRITICAL RULES FOR MATH:\n"
+                "- NEVER generate 'Define X' or 'Explain X' or 'What is X' type questions for math\n"
+                "- Every question MUST require mathematical working — calculation, proof, or construction\n"
+                "- Include specific numerical values (cm, degrees, etc.) in find/calculate questions\n"
+                "- For proofs, state exactly what needs to be proved\n"
+                "- For constructions, give exact measurements\n"
+                "- At least 40% questions should be PROVE type, 40% FIND/CALCULATE type\n"
+            )
+        else:  # MCQ
+            return (
+                "MATHEMATICS MCQ PATTERNS:\n"
+                "- Questions must require actual calculation or reasoning, not just recall\n"
+                "- Include numerical problems where students must compute the answer\n"
+                "- Options should be close numerical values (e.g., 6 cm, 8 cm, 10 cm, 12 cm) to test precision\n"
+                "- NEVER ask 'What is the definition of X' as MCQ — ask 'What is the value of X given Y'\n"
+            )
+
+    elif 'science' in subj or 'physics' in subj or 'chemistry' in subj or 'biology' in subj:
+        if qtype == 'subjective' or qtype == 'mix':
+            return (
+                "SCIENCE SUBJECTIVE QUESTION PATTERNS (MANDATORY):\n"
+                "  1. EXPLAIN MECHANISM: How does X process work? Describe with steps/stages\n"
+                "  2. NUMERICAL: Given values, calculate using formulas (for Physics/Chemistry)\n"
+                "  3. DIAGRAM-BASED: Draw and label a diagram of X. Explain the function of each part.\n"
+                "  4. COMPARE & CONTRAST: Differentiate between X and Y with examples\n"
+                "  5. REASON-BASED: Why does X happen? Give scientific reasoning with examples\n"
+                "  6. EXPERIMENT: Describe an experiment to demonstrate X. Include materials, procedure, observation, conclusion.\n"
+                "  7. APPLICATION: How is X used in daily life / industry? Give 3 examples with explanation.\n\n"
+                "CRITICAL: Do NOT generate vague questions like 'Explain photosynthesis' — instead ask:\n"
+                "'Describe the light-dependent reactions of photosynthesis. What role does chlorophyll play in capturing solar energy?'\n"
+                "- Make questions SPECIFIC with clear scope\n"
+                "- Include numerical data where applicable\n"
+            )
+        else:
+            return (
+                "SCIENCE MCQ PATTERNS:\n"
+                "- Include diagram-based reasoning questions\n"
+                "- Numerical problems with calculations\n"
+                "- Conceptual questions that test understanding, not memorization\n"
+            )
+
+    elif 'english' in subj:
+        if qtype == 'subjective' or qtype == 'mix':
+            return (
+                "ENGLISH SUBJECTIVE QUESTION PATTERNS:\n"
+                "  1. PASSAGE-BASED: Provide a short passage and ask comprehension + inference questions\n"
+                "  2. CHARACTER ANALYSIS: Analyze a character's motivations, actions, and development\n"
+                "  3. CREATIVE WRITING: Write a letter/essay/story on a given topic with word limit\n"
+                "  4. GRAMMAR APPLICATION: Rewrite sentences, transform voice/tense, correct errors in context\n"
+                "  5. CRITICAL THINKING: Compare themes across texts, evaluate author's perspective\n"
+                "- Do NOT ask 'Define noun' or 'What is a verb' — ask questions requiring APPLICATION\n"
+            )
+        else:
+            return "ENGLISH MCQ: Test grammar application, reading comprehension, vocabulary in context.\n"
+
+    elif 'social' in subj or 'history' in subj or 'geography' in subj or 'civics' in subj or 'economics' in subj:
+        if qtype == 'subjective' or qtype == 'mix':
+            return (
+                "SOCIAL SCIENCE SUBJECTIVE PATTERNS:\n"
+                "  1. ANALYZE: Why did event X happen? What were its causes and consequences?\n"
+                "  2. COMPARE: Compare the policies/movements/features of X and Y\n"
+                "  3. MAP-BASED: Locate and explain the significance of places/routes/regions\n"
+                "  4. SOURCE-BASED: Read the source and answer — interpret historical documents\n"
+                "  5. EVALUATE: Assess the impact of X on society/economy/politics with examples\n"
+                "  6. CASE STUDY: Given a scenario, apply concepts to analyze the situation\n"
+                "- NEVER ask 'Who was X' or 'When did X happen' — ask 'Analyze WHY X happened and its impact'\n"
+            )
+        else:
+            return "SOCIAL SCIENCE MCQ: Test cause-effect, map skills, source interpretation — not just dates/names.\n"
+
+    # Generic fallback for other subjects
+    if qtype == 'subjective' or qtype == 'mix':
+        return (
+            "SUBJECTIVE QUESTION PATTERNS:\n"
+            "  1. ANALYZE / EVALUATE: Questions requiring critical thinking and reasoning\n"
+            "  2. APPLY: Use concepts to solve real-world problems with specific data\n"
+            "  3. COMPARE: Detailed comparison with examples and reasoning\n"
+            "  4. CREATE / DESIGN: Design a solution, experiment, or creative piece\n"
+            "  5. JUSTIFY / PROVE: Support a statement with evidence and logical reasoning\n"
+            "- NEVER generate 'Define X', 'What is X', 'List features of X' type questions\n"
+            "- Every question must require THINKING, not just REMEMBERING\n"
+        )
+    return ""
+
+
+def _build_category_prompt(category: str, grade: str, subject: str, topic: str, difficulty: str) -> str:
+    """Return category-specific instructions for the AI."""
+    if category == "ncert":
+        return (
+            f"IMPORTANT — NCERT / CBSE BOARD EXAM LEVEL QUESTIONS:\n"
+            f"You are generating questions for {grade} {subject} on the topic '{topic}'.\n"
+            f"These questions MUST match the style and rigor of actual CBSE board exam papers and NCERT exercise questions.\n\n"
+            f"DIFFICULTY CALIBRATION for '{difficulty}':\n"
+            f"  - easy: NCERT in-text questions and basic exercise questions. Still require working/reasoning — NOT definitions.\n"
+            f"  - medium: NCERT exercise questions and CBSE board exam questions. Application-based, multi-step.\n"
+            f"  - hard: HOTS questions from CBSE board papers, exemplar problems, and NCERT exemplar. Require proof, multi-concept integration, or complex calculation.\n\n"
+            f"ABSOLUTELY FORBIDDEN:\n"
+            f"  - 'Define X', 'What is X', 'Explain X in brief', 'List the properties of X'\n"
+            f"  - Any question answerable in one line without mathematical/logical working\n"
+            f"  - Generic textbook-style recall questions\n"
+            f"  - Questions that just ask to 'compare' or 'differentiate' without specific context\n\n"
+            f"EVERY question must require the student to THINK, CALCULATE, PROVE, CONSTRUCT, or ANALYZE.\n"
+            f"Model your questions after actual CBSE board papers — look at past year question papers for reference."
+        )
+    elif category == "miscellaneous":
+        return (
+            f"MISCELLANEOUS / BROAD KNOWLEDGE QUESTIONS on '{topic}' ({subject}, {grade}):\n"
+            f"Generate questions from real-world applications, cross-disciplinary connections, interesting problems, "
+            f"and practical scenarios related to this topic.\n"
+            f"Questions should go BEYOND the textbook but remain age-appropriate for {grade}.\n"
+            f"For '{difficulty}' difficulty:\n"
+            f"  - easy: Real-world application problems with given data.\n"
+            f"  - medium: Cross-subject connections, practical engineering/daily life scenarios.\n"
+            f"  - hard: Research-level thinking, open-ended analysis, multi-domain integration.\n\n"
+            f"FORBIDDEN: 'Define X', 'What is X', generic recall questions.\n"
+            f"Every question must present a SCENARIO or PROBLEM to solve."
+        )
+    else:  # advanced
+        return (
+            f"ADVANCED / COMPETITIVE EXAM LEVEL QUESTIONS on '{topic}' ({subject}, {grade}):\n"
+            f"Generate questions at the level of competitive exams appropriate for {grade}:\n"
+            f"  - Grade 1-5: Math/Science Olympiad (SOF), IMO, NSO style\n"
+            f"  - Grade 6-8: NTSE Stage 1, Regional Olympiad style\n"
+            f"  - Grade 9-10: NTSE Stage 2, Pre-RMO, KVPY-SA, Foundation IIT/NEET style\n"
+            f"  - Grade 11-12: JEE Main/Advanced, NEET, KVPY, BITSAT style\n"
+            f"  - College: GATE, NET, GRE Subject style\n\n"
+            f"For '{difficulty}' difficulty:\n"
+            f"  - easy: Standard competitive exam questions — one concept, clear approach.\n"
+            f"  - medium: Multi-step problems combining 2-3 concepts.\n"
+            f"  - hard: Olympiad-level tricky problems, unconventional approaches, proof-based.\n\n"
+            f"FORBIDDEN: Textbook-level questions, definitions, simple recall.\n"
+            f"Every question must be a genuine PROBLEM that requires deep thinking."
+        )
+
+
+def _build_type_schema(qtype: str, paper_mode: bool) -> str:
+    """Return the JSON schema the AI must follow based on question type."""
+    mcq_obj = (
+        '    {{\n'
+        '      "id": 1,\n'
+        '      "type": "mcq",\n'
+        '      "question": "<Question text>",\n'
+        '      "options": ["A) <option>", "B) <option>", "C) <option>", "D) <option>"],\n'
+        '      "correct": "A",\n'
+        '      "explanation": "<1-2 sentence explanation>",\n'
+        '      "marks": 1{section}\n'
+        '    }}'
+    )
+    subj_obj = (
+        '    {{\n'
+        '      "id": 1,\n'
+        '      "type": "subjective",\n'
+        '      "question": "<Question text>",\n'
+        '      "correct": "",\n'
+        '      "options": [],\n'
+        '      "explanation": "<Model answer / key points — 2-4 sentences>",\n'
+        '      "marks": 2{section}\n'
+        '    }}'
+    )
+    section_field = ',\n      "section": "Section A"' if paper_mode else ''
+    mcq_obj = mcq_obj.replace('{section}', section_field)
+    subj_obj = subj_obj.replace('{section}', section_field)
+
+    if qtype == "mcq":
+        example = mcq_obj
+    elif qtype == "subjective":
+        example = subj_obj
+    else:  # mix
+        example = mcq_obj + ',\n' + subj_obj
+
+    paper_fields = ""
+    if paper_mode:
+        paper_fields = (
+            '\n  "paper_mode": true,'
+            '\n  "duration": "<suggested time, e.g. 1 Hour>",'
+            '\n  "instructions": ["<instruction 1>", "<instruction 2>", "<instruction 3>"],'
+        )
+
+    return (
+        f'{{\n'
+        f'  "title": "<Quiz / Paper title>",{paper_fields}\n'
+        f'  "questions": [\n{example}\n  ]\n'
+        f'}}'
+    )
+
+
+def _build_type_rules(qtype: str, paper_mode: bool, num_q: int) -> str:
+    """Return rules for the question type."""
+    rules = []
+    if qtype == "mcq" or qtype == "mix":
+        rules += [
+            '- For MCQ: "correct" must be A, B, C, or D',
+            '- All 4 MCQ options must be plausible — close values that require actual calculation to distinguish',
+            '- MCQ marks: 1 mark each',
+            '- MCQ questions MUST require calculation or deep reasoning, NEVER just recall',
+        ]
+    if qtype == "subjective" or qtype == "mix":
+        rules += [
+            '- For Subjective: "explanation" must contain a COMPLETE model answer / solution steps (3-6 sentences minimum)',
+            '- Marks distribution: 2-mark questions (30%), 3-mark questions (40%), 5-mark questions (30%)',
+            '- 2-mark: Short proof, simple numerical, reason-based — requires 3-4 lines of working',
+            '- 3-mark: Application problem, multi-step numerical, prove with diagram — requires 5-8 lines',
+            '- 5-mark: Complex proof, construction + proof, long numerical, case-based — requires 10+ lines',
+            '- ABSOLUTELY NO "Define X", "What is X", "Explain X", "List features" type questions',
+            '- Every subjective question MUST require the student to show mathematical working, write a proof, draw a construction, or solve a multi-step problem',
+            '- For model answers in "explanation": show the actual solution steps, not just a summary',
+        ]
+    if qtype == "mix":
+        mcq_count = max(1, num_q // 3)
+        subj_count = num_q - mcq_count
+        rules.append(f'- Generate approximately {mcq_count} MCQ and {subj_count} Subjective questions')
+        rules.append('- Put all MCQs first, then subjective questions')
+
+    if paper_mode:
+        rules += [
+            '- Organize into sections: "Section A – Objective" (1 mark each), "Section B – Short Answer" (2-3 marks), "Section C – Long Answer" (5 marks)',
+            '- Include a "section" field on every question',
+            '- Provide 3-4 clear exam instructions',
+            '- Set appropriate duration based on total marks',
+        ]
+
+    rules += [
+        '- Every question MUST have "type" set to "mcq" or "subjective"',
+        '- QUALITY CHECK: If a question can be answered by just writing a definition or one-line fact, DISCARD it and write a better question',
+        '- Include specific numerical values, measurements, and conditions in problems',
+        '- Vary the cognitive level: some application, some analysis, some evaluation, some creation',
+    ]
+    return '\n'.join(rules)
+
 
 @app.post("/api/quiz")
 async def generate_quiz(request: QuizRequest):
     if not request.topic.strip():
         raise HTTPException(status_code=400, detail="Topic cannot be empty")
-    grade_profile = get_grade_language_profile(request.grade_level)
-    prompt = f"""Generate {request.num_questions} multiple choice quiz questions about "{request.topic}" for {request.grade_level} students.
-{f'Subject: {request.subject}' if request.subject else ''}
-Difficulty: {request.difficulty}
-{grade_profile}
 
-Return ONLY valid JSON (no markdown):
-{{
-  "title": "<Quiz title>",
-  "questions": [
-    {{
-      "id": 1,
-      "question": "<Question text>",
-      "options": ["A) <option>", "B) <option>", "C) <option>", "D) <option>"],
-      "correct": "A",
-      "explanation": "<Why this answer is correct, 1-2 sentences>"
-    }}
-  ]
-}}
+    grade_profile = get_grade_language_profile(request.grade_level)
+    category_prompt = _build_category_prompt(
+        request.question_category, request.grade_level,
+        request.subject, request.topic, request.difficulty
+    )
+    subject_patterns = _get_subject_question_patterns(request.subject, request.question_type)
+    json_schema = _build_type_schema(request.question_type, request.paper_mode)
+    type_rules = _build_type_rules(request.question_type, request.paper_mode, request.num_questions)
+
+    topic_ctx = ""
+    if request.topic_description:
+        topic_ctx = f"\nCurriculum context: {request.topic_description}\n"
+
+    system_msg = (
+        "You are a senior CBSE board exam paper setter with 20+ years of experience. "
+        "You have set actual CBSE Class 10 and Class 12 board papers. "
+        "You write questions EXACTLY like they appear on real printed exam papers — complete sentences with variables, measurements, diagrams references, and clear instructions on what to prove/find/construct. "
+        "You NEVER write lazy shorthand questions. You NEVER write 'Define X' or 'Explain Y' type questions for subjects like Mathematics. "
+        "Every question you write requires genuine mathematical working, logical proof, or step-by-step analysis to solve. "
+        "Your question text is always a complete, well-formed sentence — ready to print on a board exam paper without any editing. "
+        "Always respond with valid JSON only. No markdown, no code fences, no extra text outside the JSON."
+    )
+
+    prompt = f"""You are setting a {request.difficulty}-level {request.question_type.upper()} assessment on "{request.topic}" for {request.grade_level} {request.subject}.
+{"This is a FULL QUESTION PAPER — include sections, marks allocation, and exam instructions." if request.paper_mode else ""}
+
+{category_prompt}
+
+{subject_patterns}
+
+{grade_profile}
+{topic_ctx}
+
+Generate exactly {request.num_questions} high-quality questions. Each question must be a genuine problem that requires mathematical working, logical proof, step-by-step analysis, or creative construction.
+
+SELF-CHECK before outputting each question — EVERY question MUST pass ALL checks:
+  1. Would this EXACT question wording appear on an actual CBSE board exam paper? If no, rewrite it.
+  2. Does this question require at least 3+ lines of working/writing to answer? If no, make it harder.
+  3. Is this just a "define/explain/list" question? If yes, REPLACE it with a prove/find/construct/analyze question.
+  4. Is the question text a COMPLETE, well-formed sentence? If it reads like short keywords (e.g. "Prove tangent perpendicular"), REWRITE it as a full question (e.g. "Prove that the tangent at any point of a circle is perpendicular to the radius through the point of contact.").
+  5. For NUMERICAL questions: does it specify exact values (e.g., "OT = 6 cm, OP = 10 cm")? If no, add specific values.
+  6. For PROVE questions: does it state EXACTLY what to prove? (e.g., "Prove that PA = PB" not just "Prove equal tangents").
+  7. For CONSTRUCTION questions: does it give exact measurements? (e.g., "Draw a circle of radius 4 cm. From a point 7 cm from its center, construct a pair of tangents.").
+
+CRITICAL — QUESTION TEXT QUALITY:
+- Each question MUST be written as a complete, grammatically correct sentence — the way it would appear PRINTED on an actual exam paper.
+- NEVER write shorthand like "Find length tangent 10 cm" — write "A tangent PQ at a point Q of a circle of radius 5 cm meets a line through the center O at point P such that OP = 13 cm. Find the length of PQ."
+- Include variable names (P, Q, O, A, B), measurements (cm, degrees), and relationships in the question text itself.
+- Minimum question text length: 15 words for 2-mark, 25 words for 3-mark, 35 words for 5-mark questions.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{json_schema}
 
 Rules:
-- correct must be A, B, C, or D
-- All 4 options must be plausible (no obviously wrong answers)
-- explanation must be educational and friendly
-- questions must be appropriate for grade level
-- Use simple language for younger grades"""
+{type_rules}"""
+
+    # More tokens for paper mode and more questions — subjective needs more
+    max_tok = 2000
+    if request.question_type in ("subjective", "mix"):
+        max_tok = 3000
+    if request.num_questions > 10:
+        max_tok = max(max_tok, 3500)
+    if request.num_questions > 20:
+        max_tok = max(max_tok, 5000)
+    if request.paper_mode:
+        max_tok = max(max_tok, 4000)
 
     try:
         completion = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are a quiz generator. Always respond with valid JSON only. No markdown."},
+                {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt},
             ],
-            model=OPENAI_MODEL, temperature=0.5, max_tokens=1000,
+            model=OPENAI_MODEL, temperature=0.6, max_tokens=max_tok,
         )
         import re as _re
         text = completion.choices[0].message.content.strip()
         text = _re.sub(r'^```[a-z]*\s*', '', text)
         text = _re.sub(r'\s*```$', '', text).strip()
         data = json.loads(text)
+
+        # Ensure every question has required fields
+        for i, q in enumerate(data.get("questions", [])):
+            q.setdefault("id", i + 1)
+            q.setdefault("type", "mcq" if q.get("options") else "subjective")
+            q.setdefault("marks", 1 if q.get("type") == "mcq" else 2)
+            q.setdefault("correct", "")
+            q.setdefault("explanation", "")
+            q.setdefault("options", [])
+
+        if request.paper_mode:
+            data["paper_mode"] = True
+
         return data
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse quiz JSON: {str(e)}")

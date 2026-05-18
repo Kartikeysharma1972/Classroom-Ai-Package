@@ -267,7 +267,7 @@ export default function AutoGenerator() {
   })
   const [customTopic, setCustomTopic] = useState('')
   const [topicSource, setTopicSource] = useState('dropdown') // 'dropdown' | 'custom'
-  const [results, setResults] = useState({ worksheet: '', lesson_plan: '', mc_assessment: '', quiz: '' })
+  const [results, setResults] = useState({ worksheet: '', lesson_plan: '', question_paper: '', quiz: '' })
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('lesson_plan')
   const [showHistory, setShowHistory] = useState(false)
@@ -350,7 +350,7 @@ export default function AutoGenerator() {
   const generate = async () => {
     if (!validate()) return
     setLoading(true)
-    setResults({ worksheet: '', lesson_plan: '', mc_assessment: '', quiz: '' })
+    setResults({ worksheet: '', lesson_plan: '', question_paper: '', quiz: '' })
     setTimeTaken(null)
     const start = Date.now()
 
@@ -417,7 +417,7 @@ export default function AutoGenerator() {
       const newResults = {
         worksheet:     data.worksheet,
         lesson_plan:   data.lesson_plan,
-        mc_assessment: data.mc_assessment,
+        question_paper: data.question_paper,
         quiz:          quizText,
       }
       setResults(newResults)
@@ -456,8 +456,8 @@ export default function AutoGenerator() {
             grade_level: form.grade_level,
             subject: form.subject,
             request_data: form,
-            response_preview: (data.lesson_plan || data.worksheet || data.mc_assessment)?.substring(0, 200) || '',
-            response_content: (data.lesson_plan || data.worksheet || data.mc_assessment) || ''
+            response_preview: (data.lesson_plan || data.worksheet || data.question_paper)?.substring(0, 200) || '',
+            response_content: (data.lesson_plan || data.worksheet || data.question_paper) || ''
           })
         })
       } catch (e) {
@@ -470,12 +470,12 @@ export default function AutoGenerator() {
     }
   }
 
-  const hasResults = results.lesson_plan || results.worksheet || results.mc_assessment || results.quiz
+  const hasResults = results.lesson_plan || results.worksheet || results.question_paper || results.quiz
 
   const tabList = [
     { key: 'lesson_plan',   label: 'Lesson Plan',   emoji: '📋' },
     { key: 'worksheet',     label: 'Worksheet',     emoji: '📝' },
-    { key: 'mc_assessment', label: 'MC Assessment', emoji: '✅' },
+    { key: 'question_paper', label: 'Question Paper', emoji: '✅' },
     { key: 'quiz',          label: 'Quiz',          emoji: '🎯' },
   ]
 
@@ -507,7 +507,7 @@ export default function AutoGenerator() {
                 <UsageCounter ref={usageCounterRef} teacherId={TEACHER_ID} toolName="auto-generate" />
               </h1>
               <p style={{ color: 'var(--text-2)', margin: 0, fontSize: 14 }}>
-                One click · Lesson Plan + Worksheet + MC Assessment + Quiz · Language auto-adjusted by grade
+                One click · Lesson Plan + Worksheet + Question Paper + Quiz · Language auto-adjusted by grade
               </p>
             </div>
           </div>
@@ -704,7 +704,7 @@ export default function AutoGenerator() {
 
         {/* MC Format */}
         <div className="form-group" style={{ marginBottom: 16 }}>
-          <label className="form-label">MC Assessment Format</label>
+          <label className="form-label">Question Paper Format</label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {MC_FORMATS.map(f => (
               <button
@@ -792,7 +792,7 @@ export default function AutoGenerator() {
             Generating your materials...
           </div>
           <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
-            Creating Lesson Plan, Worksheet, MC Assessment &amp; Quiz for {activeTopic || form.topic}
+            Creating Lesson Plan, Worksheet, Question Paper &amp; Quiz for {activeTopic || form.topic}
           </div>
         </div>
       )}
@@ -855,7 +855,7 @@ export default function AutoGenerator() {
           setResults({
             worksheet: chat.content || chat.preview || '',
             lesson_plan: chat.content || chat.preview || '',
-            mc_assessment: chat.content || chat.preview || ''
+            question_paper: chat.content || chat.preview || ''
           })
           setShowHistory(false)
         }}

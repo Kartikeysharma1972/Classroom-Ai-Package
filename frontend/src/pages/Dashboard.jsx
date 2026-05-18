@@ -186,24 +186,6 @@ const tools = [
     time: '~15 seconds',
   },
   {
-    to: '/mc-assessment',
-    color: '#0891b2',
-    bg: '#ecfeff',
-    border: '#a5f3fc',
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0891b2" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/>
-        <line x1="16" y1="17" x2="8" y2="17"/>
-      </svg>
-    ),
-    title: 'Question Paper',
-    desc: 'Generate MCQ, descriptive, and competency-based question papers with answer keys and explanations.',
-    features: ['MCQ format', 'Answer key', 'Difficulty levels', 'Standards-aligned'],
-    time: '~12 seconds',
-  },
-  {
     to: '/class-activity',
     color: '#059669',
     bg: '#ecfdf5',
@@ -222,21 +204,23 @@ const tools = [
     time: '~12 seconds',
   },
   {
-    to: '/quiz-generator',
+    to: '/question-paper',
     color: '#d97706',
     bg: '#fffbeb',
     border: '#fde68a',
     icon: (
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-        <line x1="12" y1="17" x2="12.01" y2="17"/>
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+        <line x1="10" y1="9" x2="8" y2="9"/>
       </svg>
     ),
-    title: 'Quiz Generator',
-    desc: 'Interactive quizzes with instant scoring, explanations, and PDF download for any subject and grade.',
-    features: ['Instant scoring', 'Explanations', 'PDF download', 'Voice input'],
-    time: '~10 seconds',
+    title: 'Question Paper Generator',
+    desc: 'NCERT-aligned question papers with MCQ, subjective, sections, marks, school watermark, and answer keys.',
+    features: ['NCERT/CBSE', 'MCQ + Subjective', 'Watermark', 'PDF Export'],
+    time: '~15 seconds',
   },
 ]
 

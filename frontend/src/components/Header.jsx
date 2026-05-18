@@ -6,9 +6,9 @@ const titles = {
   '/':               { label: 'Dashboard',              sub: 'Welcome back! Choose a tool to get started.' },
   '/worksheet':      { label: 'Worksheet Generator',    sub: 'Generate ready-to-use worksheets for any topic.' },
   '/lesson-plan':    { label: 'Lesson Plan Generator',  sub: 'Create comprehensive lesson plans in seconds.' },
-  '/mc-assessment':  { label: 'MC Quiz / Assessment',   sub: 'Build multiple choice quizzes aligned to your standards.' },
+
   '/class-activity': { label: 'Class Activity Generator', sub: 'Generate engaging group activities mapped to learning outcomes.' },
-  '/quiz-generator': { label: 'Quiz Generator',         sub: 'Generate interactive quizzes and test student knowledge.' },
+  '/question-paper': { label: 'Question Paper Generator', sub: 'Generate NCERT-aligned question papers with sections, marks, and answer keys.' },
   '/auto-generate':  { label: 'Auto Generate',          sub: 'One click — Lesson Plan + Worksheet + MC Assessment + Quiz.' },
   '/teacher-insights':{ label: 'Teacher Insights',      sub: 'Analytics and insights from your classroom activity.' },
 }

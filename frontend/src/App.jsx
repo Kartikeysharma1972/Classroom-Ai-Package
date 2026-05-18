@@ -8,10 +8,10 @@ import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import WorksheetGenerator from './pages/WorksheetGenerator'
 import LessonPlanGenerator from './pages/LessonPlanGenerator'
-import MCAssessment from './pages/MCAssessment'
+
 import AutoGenerator from './pages/AutoGenerator'
 import TeacherInsights from './pages/TeacherInsights'
-import QuizGenerator from './pages/QuizGenerator'
+import QuestionPaperGenerator from './pages/QuestionPaperGenerator'
 import ClassActivityGenerator from './pages/ClassActivityGenerator'
 
 function ProtectedLayout() {
@@ -63,10 +63,10 @@ export default function App() {
           <Route path="/auto-generate" element={<AutoGenerator />} />
           <Route path="/worksheet" element={<WorksheetGenerator />} />
           <Route path="/lesson-plan" element={<LessonPlanGenerator />} />
-          <Route path="/mc-assessment" element={<MCAssessment />} />
+
           <Route path="/class-activity" element={<ClassActivityGenerator />} />
           <Route path="/teacher-insights" element={<TeacherInsights />} />
-          <Route path="/quiz-generator" element={<QuizGenerator />} />
+          <Route path="/question-paper" element={<QuestionPaperGenerator />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/landing" />} />
