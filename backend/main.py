@@ -332,13 +332,59 @@ def generate_worksheet(req: WorksheetRequest):
             "- Focus on cause-effect, analysis, and evaluation — not just dates/names\n"
             "- Include case study and scenario-based questions\n"
         )
+    elif any(s in subj_lower for s in ['artificial intelligence', 'computer', 'information technology', 'coding', 'programming']) or subj_lower.strip() in ('ai', 'it', 'cs'):
+        subject_intelligence = (
+            "AI / COMPUTER SCIENCE / IT WORKSHEET RULES:\n"
+            "- Questions MUST be about technology concepts, NOT mathematical computation\n"
+            "- DO NOT generate math problems with tech-related object names (robots, AI, etc.)\n"
+            "- Include scenario-based questions about real-world AI/tech applications\n"
+            "- Ask about how AI is used in: healthcare, agriculture, education, transport, entertainment\n"
+            "- Include questions about ethics, data privacy, bias in AI, responsible AI use\n"
+            "- Reference real tools: Google AI, ChatGPT, Python, Scratch, Alexa/Siri, self-driving cars\n"
+            "- Test understanding of concepts: machine learning, neural networks, NLP, computer vision\n"
+            "- For MCQ: options should be technology concepts, NOT numbers\n"
+            "- NEVER write math computation questions disguised as AI/tech questions\n"
+        )
+    elif 'english' in subj_lower:
+        subject_intelligence = (
+            "ENGLISH WORKSHEET RULES:\n"
+            "- Include passage-based comprehension with inference questions\n"
+            "- Grammar questions should test APPLICATION, not just identification\n"
+            "- Include creative writing prompts with clear guidelines\n"
+            "- Test vocabulary in context, not isolated definitions\n"
+            "- For literature: character analysis, theme exploration, critical evaluation\n"
+        )
+    elif 'hindi' in subj_lower:
+        subject_intelligence = (
+            "HINDI WORKSHEET RULES:\n"
+            "- Include passage-based comprehension (apathit gadyansh)\n"
+            "- Grammar: sandhi-viched, samas, alankar, muhavare in context\n"
+            "- Creative writing: patra, nibandh, kahani with clear instructions\n"
+            "- Literature: kavya-bodh, character analysis, theme discussion\n"
+        )
+
+    # Build subject-aware system prompt
+    is_tech = any(s in subj_lower for s in ['artificial intelligence', 'computer', 'information technology', 'coding', 'programming']) or subj_lower.strip() in ('ai', 'it', 'cs')
+
+    if is_tech:
+        system_intro = (
+            f"You are a senior {req.subject} teacher with expertise in technology education. "
+            f"Every question you write is about REAL technology concepts, applications, and scenarios. "
+            f"You NEVER write math computation questions disguised as tech questions. "
+            f"You NEVER just replace object names (robots instead of apples) in math problems. "
+            f"Your questions test genuine understanding of HOW technology works and WHERE it is applied. "
+        )
+    else:
+        system_intro = (
+            "You are a senior CBSE/NCERT teacher with 20 years of experience creating worksheets. "
+            "Every question you write is SPECIFIC, requires genuine thinking, and matches the quality "
+            "of actual CBSE board exam questions. You NEVER write lazy questions like 'Define X' or 'What is X'. "
+            "Every question must require analysis, reasoning, or creative application. "
+        )
 
     system_prompt = (
-        "You are a senior CBSE/NCERT teacher with 20 years of experience creating worksheets. "
-        "Every question you write is SPECIFIC, requires genuine thinking, and matches the quality "
-        "of actual CBSE board exam questions. You NEVER write lazy questions like 'Define X' or 'What is X'. "
-        "Every question must require calculation, analysis, reasoning, or creative application. "
-        f"{lang_profile} "
+        system_intro
+        + f"{lang_profile} "
         + ("Derive ALL questions from the provided source material. " if req.source_material.strip() else "")
         + "Format output with CLEAN MARKDOWN for readability:\n"
         "- Use # for main title, ## for section headers, ### for sub-sections\n"
@@ -890,6 +936,28 @@ def generate_class_activity(req: ClassActivityRequest):
             "- Use case studies from current events connected to topics\n"
             "- Include mock parliament, mock court, or community planning exercises\n"
         )
+    elif any(s in subj_lower for s in ['artificial intelligence', 'computer', 'information technology', 'coding', 'programming']) or subj_lower.strip() in ('ai', 'it', 'cs'):
+        subject_activity_hints = (
+            "AI / COMPUTER SCIENCE / IT ACTIVITY INTELLIGENCE:\n"
+            "- Design unplugged activities that teach AI/CS concepts WITHOUT computers when needed\n"
+            "- Include hands-on activities: building decision trees on paper, playing the 'AI guessing game'\n"
+            "- Design 'AI in real life' scavenger hunts (find AI in daily life — Google Maps, Netflix, Siri)\n"
+            "- Include ethical debate activities: 'Should AI replace teachers?', 'Is facial recognition fair?'\n"
+            "- Design data collection and analysis activities (survey classmates, create charts, find patterns)\n"
+            "- Include role-play: students act as AI components (input, processing, output, feedback loop)\n"
+            "- For coding topics: design pair programming, code review, or debugging challenge activities\n"
+            "- Include design thinking: 'Design an AI solution for your school' type activities\n"
+            "- NEVER design activities that are just math problems with AI/tech words substituted in\n"
+            "- Activities should help students understand HOW AI works, not just memorize definitions\n"
+        )
+    elif 'hindi' in subj_lower:
+        subject_activity_hints = (
+            "HINDI ACTIVITY INTELLIGENCE:\n"
+            "- Include kavita-paath (poetry recitation) and natak (drama) activities\n"
+            "- Design collaborative story writing (kahani relay) activities\n"
+            "- Include debate (vaad-vivaad) and structured discussion formats\n"
+            "- Use creative activities: patra lekhan, poster making, radio natak\n"
+        )
 
     system_prompt = (
         "You are a master teacher and CBSE-trained instructional designer with expertise in "
@@ -954,7 +1022,14 @@ def generate_class_activity(req: ClassActivityRequest):
         "- --- between activities"
     )
 
-    result = call_openai(system_prompt, user_prompt, max_tokens=2000)
+    # More tokens for more activities or longer durations
+    max_tok = 3000
+    if req.num_activities >= 4:
+        max_tok = 4000
+    if req.num_activities >= 5:
+        max_tok = 5000
+
+    result = call_openai(system_prompt, user_prompt, max_tokens=max_tok)
     return {"result": result, "tool": "class-activity"}
 
 

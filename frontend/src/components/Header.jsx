@@ -9,7 +9,6 @@ const titles = {
 
   '/class-activity': { label: 'Class Activity Generator', sub: 'Generate engaging group activities mapped to learning outcomes.' },
   '/question-paper': { label: 'Question Paper Generator', sub: 'Generate NCERT-aligned question papers with sections, marks, and answer keys.' },
-  '/auto-generate':  { label: 'Auto Generate',          sub: 'One click — Lesson Plan + Worksheet + MC Assessment + Quiz.' },
   '/teacher-insights':{ label: 'Teacher Insights',      sub: 'Analytics and insights from your classroom activity.' },
 }
 
