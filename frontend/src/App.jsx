@@ -8,8 +8,6 @@ import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import WorksheetGenerator from './pages/WorksheetGenerator'
 import LessonPlanGenerator from './pages/LessonPlanGenerator'
-
-import AutoGenerator from './pages/AutoGenerator'
 import TeacherInsights from './pages/TeacherInsights'
 import QuestionPaperGenerator from './pages/QuestionPaperGenerator'
 import ClassActivityGenerator from './pages/ClassActivityGenerator'
@@ -60,7 +58,6 @@ export default function App() {
 
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/auto-generate" element={<AutoGenerator />} />
           <Route path="/worksheet" element={<WorksheetGenerator />} />
           <Route path="/lesson-plan" element={<LessonPlanGenerator />} />
 

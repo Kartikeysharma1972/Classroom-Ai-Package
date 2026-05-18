@@ -151,15 +151,6 @@ class MCAssessmentRequest(BaseModel):
     additional_instructions: str = ""
     source_material: str = ""
 
-class AutoGenerateRequest(BaseModel):
-    topic: str
-    grade_level: str
-    subject: str
-    worksheet_type: str = "mixed"
-    mc_format: str = "pure_mc"
-    num_questions: int = 10
-    source_material: str = ""
-
 # ─── RAG ENDPOINT MODELS ──────────────────────────────
 
 class CodeExplainRequest(BaseModel):
@@ -821,145 +812,6 @@ def generate_mc_assessment(req: MCAssessmentRequest):
 
     result = call_openai(system_prompt, user_prompt, max_tokens=4096)
     return {"result": result, "tool": "mc-assessment"}
-
-
-@app.post("/api/auto-generate")
-def auto_generate(req: AutoGenerateRequest):
-    if not req.topic.strip():
-        raise HTTPException(status_code=400, detail="Topic is required.")
-    if not req.grade_level.strip():
-        raise HTTPException(status_code=400, detail="Grade level is required.")
-    if not req.subject.strip():
-        raise HTTPException(status_code=400, detail="Subject is required.")
-
-    lang = get_grade_language_profile(req.grade_level)
-
-    # ── Worksheet ──────────────────────────────────────
-    type_map = {
-        "fill_blank":      "fill-in-the-blank questions (use ________ for blanks)",
-        "multiple_choice": "multiple choice questions with 4 options each (A, B, C, D)",
-        "open_ended":      "open-ended short answer questions requiring critical thinking",
-        "mixed":           "a balanced mix of fill-in-the-blank, multiple choice, and open-ended questions",
-        "qa":              "question and answer pairs formatted as 'Q: [question]' then 'A: [answer]' on separate lines",
-    }
-    auto_material_note = (
-        f"\n\nTEACHER-UPLOADED SOURCE MATERIAL (base content on this):\n---\n{req.source_material[:4000]}\n---\n"
-        if req.source_material.strip() else ""
-    )
-
-    ws_system = (
-        f"You are an expert classroom teacher creating a worksheet for {req.grade_level} students. "
-        f"{lang} "
-        + ("Base all questions on the provided source material. " if req.source_material.strip() else "")
-        + "Format with markdown: # for title, ## for sections, **bold** for key terms, "
-        "numbered lists for questions, - for bullets."
-    )
-    ws_user = (
-        f"Create a complete classroom worksheet for {req.grade_level} students.\n\n"
-        f"TOPIC: {req.topic}\nSUBJECT: {req.subject}\n"
-        f"QUESTION TYPE: {type_map.get(req.worksheet_type, type_map['mixed'])}\n"
-        f"NUMBER OF QUESTIONS: {req.num_questions}\n"
-        f"{auto_material_note}\n"
-        "Include: # worksheet title, Name/Date/Class lines, student instructions, "
-        "numbered questions, and ## Answer Key at the bottom with rationales.\n"
-        "Use markdown: # title, ## sections, **bold**, numbered lists, - bullets."
-    )
-
-    # ── Topic Overview (Page 1 — teacher reference) ────
-    ov_system = (
-        f"You are a subject matter expert and experienced educator writing a teacher reference guide. "
-        f"{lang} "
-        "Format with markdown: ## for section headers, **bold** for key terms, - for bullet lists."
-    )
-    ov_user = (
-        f"Create a comprehensive topic overview for teacher reference:\n\n"
-        f"TOPIC: {req.topic}\nSUBJECT: {req.subject}\nGRADE LEVEL: {req.grade_level}\n\n"
-        "Include ALL sections below with concise but detailed content:\n\n"
-        "1. OVERVIEW - What this topic is and why it matters at this grade level\n\n"
-        "2. KEY CONCEPTS - 5-7 core ideas with simple definitions appropriate for the grade\n\n"
-        "3. ESSENTIAL VOCABULARY - 8-10 key terms defined in student-friendly language\n\n"
-        "4. MAIN PRINCIPLES - 3-4 key rules or ideas about this topic\n\n"
-        "5. REAL-WORLD EXAMPLES - 3 concrete examples showing how this applies in daily life\n\n"
-        "6. INTERESTING FACTS - 3 fascinating or surprising facts to engage students\n\n"
-        "7. COMMON MISCONCEPTIONS - 2-3 things students often misunderstand with correct explanations\n\n"
-        f"Write everything at the correct complexity for {req.grade_level} students. "
-        "Use markdown: ## for sections, **bold** for terms, - for bullets."
-    )
-
-    # ── Lesson Plan (Page 2 — teaching instructions) ───
-    lp_system = (
-        f"You are a master curriculum designer creating a lesson plan for {req.grade_level} students. "
-        f"{lang} "
-        "Include ACTUAL worked examples with step-by-step solutions and SPECIFIC creative activities. "
-        "Never write vague instructions like 'provide examples' — write the actual examples. "
-        "Format with markdown: ## for section headers, ### for sub-sections, **bold** for key terms, "
-        "numbered lists for steps, - for bullet points, --- for dividers."
-    )
-    lp_user = (
-        f"Create a DETAILED 45-minute lesson plan with REAL teaching content:\n\n"
-        f"TOPIC: {req.topic}\nSUBJECT: {req.subject}\nGRADE LEVEL: {req.grade_level}\n\n"
-        "Include ALL sections with ACTUAL content (not placeholders):\n"
-        "1. LESSON OVERVIEW (SWBAT objectives, essential question, success criteria)\n"
-        "2. MATERIALS AND RESOURCES (with quantities)\n"
-        "3. WARM-UP/HOOK (5 min) - a SPECIFIC engaging activity, puzzle, or real-world challenge\n"
-        "4. DIRECT INSTRUCTION (15 min) - step-by-step teaching script with 2-3 WORKED EXAMPLES "
-        "showing full solutions\n"
-        "5. GUIDED PRACTICE (10 min) - a NAMED creative activity (e.g., 'Equation Relay Race') "
-        "with 3-4 actual practice questions and solutions\n"
-        "6. INDEPENDENT PRACTICE (10 min) - 4-5 actual problems with answer key\n"
-        "7. EXIT TICKET (5 min) - 2 specific questions with expected answers\n"
-        "8. DIFFERENTIATION - simpler problems for struggling learners, challenge problems for advanced\n\n"
-        "CRITICAL: Write REAL questions, REAL solutions, REAL activities. "
-        "A teacher must be able to teach directly from this.\n"
-        "Use markdown: ## for sections, ### for sub-sections, **bold** for key terms, numbered lists, - for bullets."
-    )
-
-    # ── MC Assessment ──────────────────────────────────
-    mc_count = max(1, int(req.num_questions * 0.7))
-    other_count = req.num_questions - mc_count
-    format_map = {
-        "pure_mc":      f"all {req.num_questions} standard multiple choice questions (4 options: A, B, C, D)",
-        "mc_truefalse": f"{mc_count} multiple choice (A-D) followed by {other_count} True/False questions",
-        "mc_short":     f"{mc_count} multiple choice (A-D) followed by {other_count} short answer questions",
-    }
-    mc_system = (
-        f"You are an expert assessment designer creating a quiz for {req.grade_level} students. "
-        f"{lang} "
-        "Format with markdown: # for title, ## for sections, **bold** for key terms, numbered lists for questions. "
-        "All wrong answer choices must be plausible but clearly incorrect to students who studied."
-    )
-    mc_user = (
-        f"Create a {req.num_questions}-question assessment:\n\n"
-        f"TOPIC: {req.topic}\nSUBJECT: {req.subject}\nGRADE LEVEL: {req.grade_level}\n"
-        f"FORMAT: {format_map.get(req.mc_format, format_map['pure_mc'])}\n"
-        f"{auto_material_note}\n"
-        "Include: title in ALL CAPS, Name/Date/Score fields, student instructions, "
-        "numbered questions, and ## Answer Key with one-sentence explanations per answer.\n"
-        "Use markdown: # title, ## sections, **bold**, numbered lists, - bullets."
-    )
-
-    # ── Run sequentially to stay within Groq free-tier rate limits ────────────
-    topic_overview = call_openai(ov_system, ov_user, 1200, temperature=0.3)
-    lesson_content = call_openai(lp_system, lp_user, 3000, temperature=0.4)
-    worksheet      = call_openai(ws_system, ws_user, 2000, temperature=0.4)
-    mc_assessment  = call_openai(mc_system, mc_user, 2000, temperature=0.4)
-
-    # Combine overview + lesson plan (matching the Lesson Plan Generator format)
-    lesson_plan = (
-        "=== PAGE 1: TOPIC OVERVIEW (TEACHER REFERENCE) ===\n\n"
-        + topic_overview
-        + "\n\n" + "=" * 50 + "\n\n"
-        + "=== PAGE 2: LESSON PLAN ===\n\n"
-        + lesson_content
-    )
-
-    return {
-        "worksheet":     worksheet,
-        "lesson_plan":   lesson_plan,
-        "mc_assessment": mc_assessment,
-        "grade_profile": lang,
-        "tool": "auto-generate",
-    }
 
 
 # ─── CLASS ACTIVITY GENERATOR ────────────────────────
@@ -1666,17 +1518,74 @@ def _get_subject_question_patterns(subject: str, qtype: str) -> str:
         else:
             return "SOCIAL SCIENCE MCQ: Test cause-effect, map skills, source interpretation — not just dates/names.\n"
 
+    elif 'artificial intelligence' in subj or 'ai' == subj.strip().lower() or 'computer' in subj or 'information technology' in subj or 'it' == subj.strip().lower() or 'coding' in subj or 'programming' in subj:
+        if qtype == 'subjective' or qtype == 'mix':
+            return (
+                "AI / COMPUTER SCIENCE / IT SUBJECTIVE QUESTION PATTERNS (MANDATORY):\n"
+                "You are generating questions about technology, AI, or computer science. These are NOT math questions.\n"
+                "DO NOT generate mathematical computation questions. Generate questions about TECHNOLOGY CONCEPTS.\n\n"
+                "  1. REAL-WORLD APPLICATION: How is AI/technology used in a specific real-world domain?\n"
+                "     Example: 'Explain how AI is used in healthcare for early disease detection. Describe one specific AI system used in hospitals and how it helps doctors make better diagnoses.'\n"
+                "  2. SCENARIO-BASED: Present a real scenario and ask students to apply AI/tech concepts\n"
+                "     Example: 'A school wants to build a smart attendance system using AI. Describe what type of AI technology would be needed, what data it would use, and what ethical concerns should be addressed.'\n"
+                "  3. ETHICAL ANALYSIS: Analyze ethical implications of AI/technology in society\n"
+                "     Example: 'Self-driving cars must make split-second decisions. Discuss the ethical dilemma an AI faces when it must choose between two harmful outcomes. Who should be responsible?'\n"
+                "  4. COMPARE TECHNOLOGIES: Compare different AI approaches, tools, or technologies\n"
+                "     Example: 'Compare rule-based AI systems with machine learning-based AI systems. Give one real-world example where each approach works better.'\n"
+                "  5. DESIGN / CREATE: Design an AI solution for a given problem\n"
+                "     Example: 'Design an AI-powered chatbot for a school library. Describe what questions it should answer, what data it needs, and how students would interact with it.'\n"
+                "  6. IMPACT ANALYSIS: Evaluate the impact of AI/technology on jobs, education, environment\n"
+                "     Example: 'How is AI changing the way farmers grow crops in India? Describe two AI applications in agriculture and their impact on crop yield.'\n\n"
+                "CRITICAL RULES FOR AI/CS/IT:\n"
+                "- Questions MUST be about technology concepts, applications, ethics, and real-world use cases\n"
+                "- DO NOT generate math computation questions disguised as AI questions\n"
+                "- DO NOT just replace object names (like 'robots' instead of 'apples') in math problems\n"
+                "- Questions should test understanding of HOW technology works, WHERE it is applied, and WHY it matters\n"
+                "- Include real company names, real AI tools, real-world scenarios (Google AI, ChatGPT, Tesla Autopilot, etc.)\n"
+                "- Focus on: Machine Learning basics, Neural Networks concept, NLP, Computer Vision, Robotics, IoT, Cybersecurity, Data Science, Ethics of AI\n"
+                "- Every answer should demonstrate understanding of TECHNOLOGY, not mathematics\n"
+            )
+        else:  # MCQ
+            return (
+                "AI / COMPUTER SCIENCE / IT MCQ PATTERNS:\n"
+                "- Questions must test understanding of AI/technology concepts, NOT mathematical computation\n"
+                "- Include questions about real-world AI applications (healthcare, agriculture, transport, education)\n"
+                "- Test knowledge of AI types (supervised/unsupervised learning, NLP, computer vision, robotics)\n"
+                "- Include scenario-based questions where students identify the correct AI technique\n"
+                "- Ask about ethical considerations, data privacy, bias in AI\n"
+                "- Reference real tools and technologies (Python, Scratch, Google AI, ChatGPT, etc.)\n"
+                "- NEVER ask mathematical computation questions disguised as AI/tech questions\n"
+                "- Options should be technology concepts, not numbers\n"
+            )
+
+    elif 'hindi' in subj:
+        if qtype == 'subjective' or qtype == 'mix':
+            return (
+                "HINDI SUBJECTIVE QUESTION PATTERNS:\n"
+                "  1. PASSAGE-BASED: Provide a Hindi passage and ask comprehension + inference questions\n"
+                "  2. CREATIVE WRITING: Write a letter/essay/story/poem in Hindi on a given topic\n"
+                "  3. GRAMMAR APPLICATION: Rewrite sentences, transform voice/tense, sandhi-viched, samas\n"
+                "  4. LITERARY ANALYSIS: Analyze themes, characters, and messages in Hindi literature\n"
+                "  5. CRITICAL THINKING: Discuss the relevance of a Hindi literary work in modern context\n"
+                "- Questions should test language application, not just memory\n"
+            )
+        else:
+            return "HINDI MCQ: Test grammar application, reading comprehension, vocabulary, and literary knowledge.\n"
+
     # Generic fallback for other subjects
     if qtype == 'subjective' or qtype == 'mix':
         return (
             "SUBJECTIVE QUESTION PATTERNS:\n"
-            "  1. ANALYZE / EVALUATE: Questions requiring critical thinking and reasoning\n"
-            "  2. APPLY: Use concepts to solve real-world problems with specific data\n"
-            "  3. COMPARE: Detailed comparison with examples and reasoning\n"
-            "  4. CREATE / DESIGN: Design a solution, experiment, or creative piece\n"
-            "  5. JUSTIFY / PROVE: Support a statement with evidence and logical reasoning\n"
+            "IMPORTANT: Generate questions that are GENUINELY about the subject and topic specified.\n"
+            "DO NOT generate math questions for non-math subjects. Match the question style to the actual subject.\n\n"
+            "  1. ANALYZE / EVALUATE: Questions requiring critical thinking and reasoning about the ACTUAL topic\n"
+            "  2. APPLY: Use concepts to solve real-world problems related to the SPECIFIC subject\n"
+            "  3. COMPARE: Detailed comparison with examples and reasoning within the subject domain\n"
+            "  4. CREATE / DESIGN: Design a solution, experiment, or creative piece relevant to the topic\n"
+            "  5. JUSTIFY / PROVE: Support a statement with evidence and logical reasoning from the subject\n"
             "- NEVER generate 'Define X', 'What is X', 'List features of X' type questions\n"
             "- Every question must require THINKING, not just REMEMBERING\n"
+            "- Questions must be GENUINELY about the topic — not math problems with topic-related words substituted in\n"
         )
     return ""
 
@@ -1782,27 +1691,62 @@ def _build_type_schema(qtype: str, paper_mode: bool) -> str:
     )
 
 
-def _build_type_rules(qtype: str, paper_mode: bool, num_q: int) -> str:
+def _build_type_rules(qtype: str, paper_mode: bool, num_q: int, subject: str = "") -> str:
     """Return rules for the question type."""
+    subj_lower = subject.lower()
+    is_math = 'math' in subj_lower
+    is_tech = any(x in subj_lower for x in ['artificial intelligence', 'computer', 'information technology', 'coding', 'programming']) or subj_lower.strip() in ('ai', 'it', 'cs')
+
     rules = []
     if qtype == "mcq" or qtype == "mix":
-        rules += [
-            '- For MCQ: "correct" must be A, B, C, or D',
-            '- All 4 MCQ options must be plausible — close values that require actual calculation to distinguish',
-            '- MCQ marks: 1 mark each',
-            '- MCQ questions MUST require calculation or deep reasoning, NEVER just recall',
-        ]
+        if is_tech:
+            rules += [
+                '- For MCQ: "correct" must be A, B, C, or D',
+                '- All 4 MCQ options must be plausible technology concepts — NOT numbers or math values',
+                '- MCQ marks: 1 mark each',
+                '- MCQ questions MUST test understanding of technology concepts, applications, or scenarios',
+            ]
+        else:
+            rules += [
+                '- For MCQ: "correct" must be A, B, C, or D',
+                '- All 4 MCQ options must be plausible — close values that require actual reasoning to distinguish',
+                '- MCQ marks: 1 mark each',
+                '- MCQ questions MUST require deep reasoning, NEVER just recall',
+            ]
     if qtype == "subjective" or qtype == "mix":
-        rules += [
-            '- For Subjective: "explanation" must contain a COMPLETE model answer / solution steps (3-6 sentences minimum)',
-            '- Marks distribution: 2-mark questions (30%), 3-mark questions (40%), 5-mark questions (30%)',
-            '- 2-mark: Short proof, simple numerical, reason-based — requires 3-4 lines of working',
-            '- 3-mark: Application problem, multi-step numerical, prove with diagram — requires 5-8 lines',
-            '- 5-mark: Complex proof, construction + proof, long numerical, case-based — requires 10+ lines',
-            '- ABSOLUTELY NO "Define X", "What is X", "Explain X", "List features" type questions',
-            '- Every subjective question MUST require the student to show mathematical working, write a proof, draw a construction, or solve a multi-step problem',
-            '- For model answers in "explanation": show the actual solution steps, not just a summary',
-        ]
+        if is_tech:
+            rules += [
+                '- For Subjective: "explanation" must contain a COMPLETE model answer (3-6 sentences minimum) about technology concepts',
+                '- Marks distribution: 2-mark questions (30%), 3-mark questions (40%), 5-mark questions (30%)',
+                '- 2-mark: Short application question about how a specific AI/tech tool works — requires 3-4 lines',
+                '- 3-mark: Scenario-based question analyzing real-world AI application or ethical concern — requires 5-8 lines',
+                '- 5-mark: Design an AI solution, compare technologies, or analyze societal impact of AI — requires 10+ lines',
+                '- ABSOLUTELY NO math computation questions disguised as AI/tech questions',
+                '- Every subjective question MUST require the student to demonstrate understanding of TECHNOLOGY concepts',
+                '- For model answers in "explanation": explain the technology concept, give real examples, discuss implications',
+            ]
+        elif is_math:
+            rules += [
+                '- For Subjective: "explanation" must contain a COMPLETE model answer / solution steps (3-6 sentences minimum)',
+                '- Marks distribution: 2-mark questions (30%), 3-mark questions (40%), 5-mark questions (30%)',
+                '- 2-mark: Short proof, simple numerical, reason-based — requires 3-4 lines of working',
+                '- 3-mark: Application problem, multi-step numerical, prove with diagram — requires 5-8 lines',
+                '- 5-mark: Complex proof, construction + proof, long numerical, case-based — requires 10+ lines',
+                '- ABSOLUTELY NO "Define X", "What is X", "Explain X", "List features" type questions',
+                '- Every subjective question MUST require the student to show mathematical working, write a proof, draw a construction, or solve a multi-step problem',
+                '- For model answers in "explanation": show the actual solution steps, not just a summary',
+            ]
+        else:
+            rules += [
+                '- For Subjective: "explanation" must contain a COMPLETE model answer (3-6 sentences minimum)',
+                '- Marks distribution: 2-mark questions (30%), 3-mark questions (40%), 5-mark questions (30%)',
+                '- 2-mark: Short analysis or application question — requires 3-4 lines of thoughtful writing',
+                '- 3-mark: Scenario-based or compare/contrast question — requires 5-8 lines',
+                '- 5-mark: Detailed analysis, case study, or evaluation — requires 10+ lines',
+                '- ABSOLUTELY NO "Define X", "What is X", "List features" type questions',
+                f'- Every subjective question MUST be genuinely about the specified subject and topic',
+                '- For model answers in "explanation": provide detailed reasoning, examples, and analysis',
+            ]
     if qtype == "mix":
         mcq_count = max(1, num_q // 3)
         subj_count = num_q - mcq_count
@@ -1838,21 +1782,87 @@ async def generate_quiz(request: QuizRequest):
     )
     subject_patterns = _get_subject_question_patterns(request.subject, request.question_type)
     json_schema = _build_type_schema(request.question_type, request.paper_mode)
-    type_rules = _build_type_rules(request.question_type, request.paper_mode, request.num_questions)
+    type_rules = _build_type_rules(request.question_type, request.paper_mode, request.num_questions, request.subject)
 
     topic_ctx = ""
     if request.topic_description:
         topic_ctx = f"\nCurriculum context: {request.topic_description}\n"
 
-    system_msg = (
-        "You are a senior CBSE board exam paper setter with 20+ years of experience. "
-        "You have set actual CBSE Class 10 and Class 12 board papers. "
-        "You write questions EXACTLY like they appear on real printed exam papers — complete sentences with variables, measurements, diagrams references, and clear instructions on what to prove/find/construct. "
-        "You NEVER write lazy shorthand questions. You NEVER write 'Define X' or 'Explain Y' type questions for subjects like Mathematics. "
-        "Every question you write requires genuine mathematical working, logical proof, or step-by-step analysis to solve. "
-        "Your question text is always a complete, well-formed sentence — ready to print on a board exam paper without any editing. "
-        "Always respond with valid JSON only. No markdown, no code fences, no extra text outside the JSON."
-    )
+    # Detect if this is a math/numerical subject vs conceptual subject
+    subj_lower = request.subject.lower()
+    is_math = 'math' in subj_lower
+    is_science_numerical = any(x in subj_lower for x in ['physics', 'chemistry'])
+    is_tech = any(x in subj_lower for x in ['artificial intelligence', 'computer', 'information technology', 'coding', 'programming']) or subj_lower.strip() in ('ai', 'it', 'cs')
+
+    if is_math:
+        system_msg = (
+            "You are a senior CBSE board exam paper setter with 20+ years of experience in Mathematics. "
+            "You write questions EXACTLY like they appear on real printed CBSE math exam papers — complete sentences with variables, measurements, and clear instructions on what to prove/find/construct. "
+            "You NEVER write lazy shorthand questions. You NEVER write 'Define X' or 'Explain Y' type questions. "
+            "Every question requires genuine mathematical working, logical proof, or step-by-step calculation. "
+            "Always respond with valid JSON only. No markdown, no code fences, no extra text outside the JSON."
+        )
+    elif is_tech:
+        system_msg = (
+            f"You are a senior exam paper setter specializing in {request.subject} education for school students. "
+            f"You have deep knowledge of how AI, machine learning, computer science, and technology work in the REAL WORLD. "
+            f"You write questions that test genuine understanding of technology concepts, real-world applications, ethical implications, and practical scenarios. "
+            f"You NEVER generate math computation questions disguised as technology questions. "
+            f"You NEVER just replace object names (like 'robots' instead of 'apples') in math problems. "
+            f"Your questions are about HOW technology works, WHERE it is applied, WHY it matters, and WHAT are its implications. "
+            f"Include references to real AI systems (Google AI, ChatGPT, Tesla Autopilot, facial recognition, recommendation systems, etc.). "
+            "Always respond with valid JSON only. No markdown, no code fences, no extra text outside the JSON."
+        )
+    else:
+        system_msg = (
+            f"You are a senior CBSE board exam paper setter with 20+ years of experience in {request.subject}. "
+            f"You write questions EXACTLY like they appear on real printed exam papers — complete, well-formed sentences. "
+            f"You NEVER write lazy shorthand questions. Every question requires genuine thinking, analysis, or application. "
+            f"Your questions are GENUINELY about {request.subject} — not math problems with subject-related words substituted in. "
+            "Always respond with valid JSON only. No markdown, no code fences, no extra text outside the JSON."
+        )
+
+    # Build subject-appropriate self-check rules
+    if is_math:
+        quality_checks = (
+            "SELF-CHECK before outputting each question — EVERY question MUST pass ALL checks:\n"
+            "  1. Would this EXACT question wording appear on an actual CBSE board exam paper? If no, rewrite it.\n"
+            "  2. Does this question require at least 3+ lines of mathematical working to answer? If no, make it harder.\n"
+            "  3. Is this just a 'define/explain/list' question? If yes, REPLACE it with a prove/find/construct/analyze question.\n"
+            "  4. Is the question text a COMPLETE, well-formed sentence with variable names, measurements, and relationships?\n"
+            "  5. For NUMERICAL questions: does it specify exact values (e.g., 'OT = 6 cm, OP = 10 cm')? If no, add specific values.\n"
+            "  6. For PROVE questions: does it state EXACTLY what to prove?\n"
+            "  7. For CONSTRUCTION questions: does it give exact measurements?\n\n"
+            "CRITICAL — QUESTION TEXT QUALITY:\n"
+            "- Include variable names (P, Q, O, A, B), measurements (cm, degrees), and relationships in the question text.\n"
+            "- Minimum question text length: 15 words for 2-mark, 25 words for 3-mark, 35 words for 5-mark questions."
+        )
+    elif is_tech:
+        quality_checks = (
+            f"SELF-CHECK before outputting each question — EVERY question MUST pass ALL checks:\n"
+            f"  1. Is this question GENUINELY about {request.subject} / {request.topic}? If it's a math problem with tech words, REWRITE it.\n"
+            f"  2. Does this question test understanding of HOW technology works or WHERE it is applied? If no, fix it.\n"
+            f"  3. Could a student answer this without knowing anything about {request.topic}? If yes, the question is BAD — rewrite it.\n"
+            f"  4. Does the question involve a real-world scenario, ethical dilemma, or practical application? If no, add one.\n"
+            f"  5. Are the answer options/explanations about technology concepts (not numbers)? If they're just numbers, REWRITE.\n"
+            f"  6. Would a {request.subject} teacher approve this question as relevant to their subject? If no, REPLACE it.\n\n"
+            f"CRITICAL — TOPIC RELEVANCE for '{request.topic}':\n"
+            f"- Every question must be DIRECTLY about {request.topic} in the context of {request.subject}.\n"
+            f"- Use real examples: Google Search AI, Netflix recommendations, Siri/Alexa, self-driving cars, AI in farming, AI in hospitals, facial recognition, spam filters, etc.\n"
+            f"- Questions should make students THINK about technology's role in society, not calculate numbers."
+        )
+    else:
+        quality_checks = (
+            f"SELF-CHECK before outputting each question — EVERY question MUST pass ALL checks:\n"
+            f"  1. Is this question GENUINELY about {request.subject} / {request.topic}? Not a disguised math problem?\n"
+            f"  2. Does this question require at least 3+ lines of thoughtful writing to answer? If no, make it harder.\n"
+            f"  3. Is this just a 'define/explain/list' question? If yes, REPLACE it with an analyze/evaluate/apply question.\n"
+            f"  4. Is the question text a COMPLETE, well-formed sentence ready to print on an exam paper?\n"
+            f"  5. Does the question test genuine understanding of {request.topic}? If it's generic, make it specific.\n\n"
+            f"CRITICAL — QUESTION TEXT QUALITY:\n"
+            f"- Each question MUST be written as a complete, grammatically correct sentence.\n"
+            f"- Minimum question text length: 15 words for 2-mark, 25 words for 3-mark, 35 words for 5-mark questions."
+        )
 
     prompt = f"""You are setting a {request.difficulty}-level {request.question_type.upper()} assessment on "{request.topic}" for {request.grade_level} {request.subject}.
 {"This is a FULL QUESTION PAPER — include sections, marks allocation, and exam instructions." if request.paper_mode else ""}
@@ -1864,22 +1874,9 @@ async def generate_quiz(request: QuizRequest):
 {grade_profile}
 {topic_ctx}
 
-Generate exactly {request.num_questions} high-quality questions. Each question must be a genuine problem that requires mathematical working, logical proof, step-by-step analysis, or creative construction.
+Generate exactly {request.num_questions} high-quality questions. Each question must be genuinely about "{request.topic}" in the context of {request.subject} — testing real understanding of the subject matter.
 
-SELF-CHECK before outputting each question — EVERY question MUST pass ALL checks:
-  1. Would this EXACT question wording appear on an actual CBSE board exam paper? If no, rewrite it.
-  2. Does this question require at least 3+ lines of working/writing to answer? If no, make it harder.
-  3. Is this just a "define/explain/list" question? If yes, REPLACE it with a prove/find/construct/analyze question.
-  4. Is the question text a COMPLETE, well-formed sentence? If it reads like short keywords (e.g. "Prove tangent perpendicular"), REWRITE it as a full question (e.g. "Prove that the tangent at any point of a circle is perpendicular to the radius through the point of contact.").
-  5. For NUMERICAL questions: does it specify exact values (e.g., "OT = 6 cm, OP = 10 cm")? If no, add specific values.
-  6. For PROVE questions: does it state EXACTLY what to prove? (e.g., "Prove that PA = PB" not just "Prove equal tangents").
-  7. For CONSTRUCTION questions: does it give exact measurements? (e.g., "Draw a circle of radius 4 cm. From a point 7 cm from its center, construct a pair of tangents.").
-
-CRITICAL — QUESTION TEXT QUALITY:
-- Each question MUST be written as a complete, grammatically correct sentence — the way it would appear PRINTED on an actual exam paper.
-- NEVER write shorthand like "Find length tangent 10 cm" — write "A tangent PQ at a point Q of a circle of radius 5 cm meets a line through the center O at point P such that OP = 13 cm. Find the length of PQ."
-- Include variable names (P, Q, O, A, B), measurements (cm, degrees), and relationships in the question text itself.
-- Minimum question text length: 15 words for 2-mark, 25 words for 3-mark, 35 words for 5-mark questions.
+{quality_checks}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {json_schema}

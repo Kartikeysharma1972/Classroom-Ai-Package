@@ -1,172 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-
-function downloadPDF(content, filename) {
-  const script = document.createElement('script')
-  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
-  script.onload = () => {
-    const { jsPDF } = window.jspdf
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const lines = doc.splitTextToSize(content, 180)
-    let y = 20
-    doc.setFontSize(11)
-    lines.forEach(line => {
-      if (y > 280) { doc.addPage(); y = 20 }
-      doc.text(line, 15, y)
-      y += 6
-    })
-    doc.save(filename)
-  }
-  if (!window.jspdf) document.head.appendChild(script)
-  else script.onload()
-}
-
-function RecentGenerations() {
-  const navigate = useNavigate()
-  const [history, setHistory] = useState([])
-  const [expanded, setExpanded] = useState(null)
-  const [activeTab, setActiveTab] = useState({})
-
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem('classroom-auto-history') || '[]')
-    setHistory(saved)
-  }, [])
-
-  if (history.length === 0) return null
-
-  const tabLabels = [
-    { key: 'lesson_plan',   label: 'Lesson Plan',   emoji: '📋' },
-    { key: 'worksheet',     label: 'Worksheet',     emoji: '📝' },
-    { key: 'mc_assessment', label: 'MC Assessment', emoji: '✅' },
-  ]
-
-  return (
-    <div style={{ marginBottom: 28 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-1)', margin: 0 }}>
-          Recent Auto-Generations
-        </h2>
-        <button
-          onClick={() => { localStorage.removeItem('classroom-auto-history'); setHistory([]) }}
-          style={{ fontSize: 12, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          Clear all
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {history.map((item) => {
-          const isOpen = expanded === item.id
-          const tab = activeTab[item.id] || 'lesson_plan'
-          return (
-            <div key={item.id} style={{
-              background: 'var(--surface)', border: '1.5px solid var(--border)',
-              borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--shadow)',
-            }}>
-              {/* Header row */}
-              <div
-                onClick={() => setExpanded(isOpen ? null : item.id)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 14,
-                  padding: '14px 20px', cursor: 'pointer',
-                  background: isOpen ? 'var(--accent-soft)' : 'var(--surface)',
-                  borderBottom: isOpen ? '1.5px solid var(--border)' : 'none',
-                  transition: 'background 0.15s',
-                }}
-              >
-                <div style={{
-                  width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                  background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 18,
-                }}>⚡</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', marginBottom: 2 }}>
-                    {item.topic}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                    {item.grade} · {item.subject} · {item.generatedAt} · ⚡{item.timeTaken}s
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  {tabLabels.map(t => (
-                    <button
-                      key={t.key}
-                      onClick={e => {
-                        e.stopPropagation()
-                        downloadPDF(item[t.key], `${item.topic}-${t.label}.pdf`)
-                      }}
-                      style={{
-                        fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6,
-                        border: '1.5px solid var(--border)', background: 'var(--surface)',
-                        cursor: 'pointer', color: 'var(--text-2)',
-                        display: 'flex', alignItems: 'center', gap: 4,
-                      }}
-                      title={`Download ${t.label} PDF`}
-                    >
-                      {t.emoji} PDF
-                    </button>
-                  ))}
-                  <span style={{ fontSize: 18, color: 'var(--text-3)', marginLeft: 4 }}>
-                    {isOpen ? '▲' : '▼'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Expanded content with tabs */}
-              {isOpen && (
-                <div style={{ padding: '16px 20px' }}>
-                  {/* Tabs */}
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                    {tabLabels.map(t => (
-                      <button
-                        key={t.key}
-                        onClick={() => setActiveTab(prev => ({ ...prev, [item.id]: t.key }))}
-                        style={{
-                          padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                          cursor: 'pointer', border: 'none', transition: 'all 0.15s',
-                          background: tab === t.key ? 'var(--accent)' : 'var(--bg)',
-                          color: tab === t.key ? '#fff' : 'var(--text-2)',
-                        }}
-                      >
-                        {t.emoji} {t.label}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => downloadPDF(item[tab], `${item.topic}-${tabLabels.find(t=>t.key===tab)?.label}.pdf`)}
-                      style={{
-                        marginLeft: 'auto', padding: '7px 16px', borderRadius: 8,
-                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                        background: 'linear-gradient(135deg,#f59e0b,#ef4444)',
-                        color: '#fff', border: 'none',
-                        boxShadow: '0 2px 8px rgba(245,158,11,0.3)',
-                      }}
-                    >
-                      ⬇ Download PDF
-                    </button>
-                  </div>
-
-                  {/* Content preview */}
-                  <pre style={{
-                    background: 'var(--bg)', border: '1px solid var(--border)',
-                    borderRadius: 8, padding: '14px 16px',
-                    fontSize: 12, lineHeight: 1.7, color: 'var(--text-1)',
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    maxHeight: 320, overflowY: 'auto', margin: 0,
-                    fontFamily: 'monospace',
-                  }}>
-                    {item[tab]}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 const tools = [
   {
@@ -225,7 +59,7 @@ const tools = [
 ]
 
 const stats = [
-  { label: 'AI Tools', value: '4', icon: '🛠' },
+  { label: 'AI Tools', value: '5', icon: '🛠' },
   { label: 'Time Saved/Week', value: '10h+', icon: '⏱' },
   { label: 'Grade Levels', value: 'K–12', icon: '🎓' },
   { label: 'Powered By', icon: '⚡' },
@@ -252,7 +86,7 @@ export default function Dashboard() {
         <p style={{ fontSize: '1rem', opacity: 0.88, maxWidth: 500, lineHeight: 1.6, marginBottom: 20 }}>
           Your AI toolkit for teaching. Generate lesson plans, question papers, activities, and quizzes in seconds.
         </p>
-        <button className="btn" onClick={() => navigate('/auto-generate')} style={{ background: '#fff', color: '#4f46e5', fontWeight: 700, padding: '10px 22px' }}>
+        <button className="btn" onClick={() => navigate('/lesson-plan')} style={{ background: '#fff', color: '#4f46e5', fontWeight: 700, padding: '10px 22px' }}>
           Start Creating
         </button>
       </div>
@@ -275,45 +109,10 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Recent Generations */}
-      <RecentGenerations />
-
-      {/* Auto Generate Featured Card */}
-      <div
-        className="fade-up-2"
-        onClick={() => navigate('/auto-generate')}
-        style={{
-          marginBottom: 24, padding: '24px 28px', borderRadius: 18, cursor: 'pointer',
-          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #6366f1 100%)',
-          border: 'none', color: '#fff', boxShadow: '0 8px 32px rgba(79,70,229,0.25)',
-          transition: 'all 0.22s ease', display: 'flex', alignItems: 'center', gap: 24,
-        }}
-        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 16px 48px rgba(79,70,229,0.35)' }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(79,70,229,0.25)' }}
-      >
-        <div style={{ fontSize: 44, flexShrink: 0 }}>⚡</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.3px' }}>Auto Generate — All 4 Tools at Once</span>
-            <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(255,255,255,0.25)', padding: '2px 10px', borderRadius: 100, textTransform: 'uppercase', letterSpacing: '0.6px' }}>NEW</span>
-          </div>
-          <p style={{ fontSize: 14, opacity: 0.9, margin: 0, lineHeight: 1.55 }}>
-            Select grade + subject + topic once → get a Lesson Plan, Worksheet, MC Assessment &amp; Quiz in one click.
-            Language automatically adjusts for each grade level. Powered by MCP automation.
-          </p>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            {['Auto language adjustment', 'Parallel generation', 'MCP-powered', '4 tools in ~30s'].map(f => (
-              <span key={f} style={{ fontSize: 11, fontWeight: 700, background: 'rgba(255,255,255,0.2)', padding: '3px 10px', borderRadius: 100 }}>{f}</span>
-            ))}
-          </div>
-        </div>
-        <div style={{ fontSize: 24, opacity: 0.8, flexShrink: 0 }}>→</div>
-      </div>
-
       {/* Tool Cards */}
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-1)', marginBottom: 16 }}>Teaching Tools</h2>
-        <div className="grid-3 fade-up-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <div className="grid-3 fade-up-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
           {tools.map((tool, i) => (
             <div
               key={i}
