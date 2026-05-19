@@ -270,8 +270,14 @@ export default function QuestionPaperGenerator() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, grade_level: grade, subject, num_questions: numQ, difficulty, question_category: questionCategory, question_type: questionType, paper_mode: true, topic_description: topicDesc, topic_track: subjectTrack }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Failed')
+      if (!res.ok) {
+        let errMsg = 'Failed to generate question paper'
+        try { const errData = await res.json(); errMsg = errData.detail || errMsg } catch {}
+        throw new Error(errMsg)
+      }
+      const text = await res.text()
+      let data
+      try { data = JSON.parse(text) } catch { throw new Error('AI returned an invalid response. Please try again.') }
       setPaper(data); setMode('paper')
       if (usageCounterRef.current) usageCounterRef.current.refresh()
 

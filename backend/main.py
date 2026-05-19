@@ -1982,7 +1982,55 @@ Rules:
         text = completion.choices[0].message.content.strip()
         text = _re.sub(r'^```[a-z]*\s*', '', text)
         text = _re.sub(r'\s*```$', '', text).strip()
-        data = json.loads(text)
+
+        # Robust JSON repair: LLMs sometimes produce trailing commas, unescaped chars, or truncated output
+        def _repair_json(raw: str) -> dict:
+            """Try increasingly aggressive repairs to parse LLM JSON."""
+            # Attempt 1: direct parse
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+            # Attempt 2: fix trailing commas before } or ]
+            fixed = _re.sub(r',\s*([\]}])', r'\1', raw)
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
+            # Attempt 3: fix unescaped newlines inside strings
+            fixed2 = _re.sub(r'(?<=": ")(.*?)(?=")', lambda m: m.group(0).replace('\n', '\\n'), fixed)
+            try:
+                return json.loads(fixed2)
+            except json.JSONDecodeError:
+                pass
+            # Attempt 4: truncated JSON — find last complete question object and close the structure
+            last_brace = raw.rfind('}')
+            if last_brace > 0:
+                truncated = raw[:last_brace + 1]
+                # Close any open arrays/objects
+                open_brackets = truncated.count('[') - truncated.count(']')
+                open_braces = truncated.count('{') - truncated.count('}')
+                truncated += ']' * open_brackets + '}' * open_braces
+                truncated = _re.sub(r',\s*([\]}])', r'\1', truncated)
+                try:
+                    return json.loads(truncated)
+                except json.JSONDecodeError:
+                    pass
+            # Attempt 5: extract JSON object from any surrounding text
+            match = _re.search(r'\{[\s\S]*\}', raw)
+            if match:
+                extracted = match.group(0)
+                extracted = _re.sub(r',\s*([\]}])', r'\1', extracted)
+                open_brackets = extracted.count('[') - extracted.count(']')
+                open_braces = extracted.count('{') - extracted.count('}')
+                extracted += ']' * open_brackets + '}' * open_braces
+                try:
+                    return json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
+            raise json.JSONDecodeError("All repair attempts failed", raw, 0)
+
+        data = _repair_json(text)
 
         # Ensure every question has required fields
         for i, q in enumerate(data.get("questions", [])):
@@ -1997,8 +2045,32 @@ Rules:
             data["paper_mode"] = True
 
         return data
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse quiz JSON: {str(e)}")
+    except json.JSONDecodeError:
+        # Retry once with lower temperature for more predictable JSON
+        try:
+            completion2 = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_msg + "\nCRITICAL: Your previous response had invalid JSON. Return ONLY a single valid JSON object. No trailing commas, no comments, no truncation."},
+                    {"role": "user", "content": prompt},
+                ],
+                model=OPENAI_MODEL, temperature=0.3, max_tokens=max_tok,
+            )
+            text2 = completion2.choices[0].message.content.strip()
+            text2 = _re.sub(r'^```[a-z]*\s*', '', text2)
+            text2 = _re.sub(r'\s*```$', '', text2).strip()
+            data = _repair_json(text2)
+            for i, q in enumerate(data.get("questions", [])):
+                q.setdefault("id", i + 1)
+                q.setdefault("type", "mcq" if q.get("options") else "subjective")
+                q.setdefault("marks", 1 if q.get("type") == "mcq" else 2)
+                q.setdefault("correct", "")
+                q.setdefault("explanation", "")
+                q.setdefault("options", [])
+            if request.paper_mode:
+                data["paper_mode"] = True
+            return data
+        except Exception:
+            raise HTTPException(status_code=500, detail="AI generated an invalid response. Please try again.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
