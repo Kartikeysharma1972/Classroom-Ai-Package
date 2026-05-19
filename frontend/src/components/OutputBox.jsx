@@ -388,9 +388,12 @@ function RenderedOutput({ text }) {
 }
 
 // ── MAIN COMPONENT ────────────────────────────────────
-export default function OutputBox({ result, loading, toolName = 'output', icon, onClear }) {
+export default function OutputBox({ result, loading, toolName = 'output', icon, onClear, onEdit }) {
   const [toastState, setToastState] = useState({ msg: '', show: false })
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
+  const editRef = useRef(null)
   const timer = useRef()
 
   const showToast = (msg) => {
@@ -400,23 +403,67 @@ export default function OutputBox({ result, loading, toolName = 'output', icon, 
   }
 
   const handleCopy = async () => {
-    try { await navigator.clipboard.writeText(result); showToast('Copied to clipboard!') }
+    const text = editing ? editText : result
+    try { await navigator.clipboard.writeText(text); showToast('Copied to clipboard!') }
     catch { showToast('Could not copy') }
   }
 
   const handleDownloadTxt = () => {
-    downloadTxt(result, `${toolName.replace(/\s+/g, '-')}.txt`)
+    const text = editing ? editText : result
+    downloadTxt(text, `${toolName.replace(/\s+/g, '-')}.txt`)
     showToast('Downloaded as TXT!')
   }
 
   const handleDownloadPDF = () => {
+    const text = editing ? editText : result
     setPdfLoading(true)
     showToast('Preparing PDF…')
     setTimeout(() => {
-      downloadPDF(result, toolName)
+      downloadPDF(text, toolName)
       setPdfLoading(false)
       showToast('Downloaded as PDF!')
     }, 300)
+  }
+
+  const startEdit = () => {
+    setEditText(result)
+    setEditing(true)
+    setTimeout(() => { if (editRef.current) editRef.current.focus() }, 50)
+  }
+
+  const saveEdit = () => {
+    if (onEdit) onEdit(editText)
+    setEditing(false)
+    showToast('Changes saved!')
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setEditText('')
+  }
+
+  // Handle keyboard shortcuts in editor
+  const handleEditorKey = (e) => {
+    // Ctrl+S / Cmd+S to save
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault()
+      saveEdit()
+    }
+    // Escape to cancel
+    if (e.key === 'Escape') {
+      cancelEdit()
+    }
+    // Tab to indent
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = e.target
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      const val = ta.value
+      const newVal = val.substring(0, start) + '  ' + val.substring(end)
+      setEditText(newVal)
+      setTimeout(() => { ta.selectionStart = ta.selectionEnd = start + 2 }, 0)
+    }
   }
 
   const isEmpty = !result && !loading
@@ -432,11 +479,31 @@ export default function OutputBox({ result, loading, toolName = 'output', icon, 
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
               </svg>
             )}
-            Generated Output
+            {editing ? 'Editing Output' : 'Generated Output'}
+            {editing && (
+              <span style={{
+                fontSize: '0.65rem', fontWeight: 600, background: '#fef3c7', color: '#92400e',
+                padding: '2px 8px', borderRadius: 100, marginLeft: 6, letterSpacing: '0.3px',
+              }}>EDIT MODE</span>
+            )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {result && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            {result && !editing && (
               <>
+                {onEdit && (
+                  <button className="btn btn-ghost" style={{
+                    padding: '6px 12px', fontSize: 12,
+                    color: '#7c3aed', borderColor: '#ddd6fe',
+                    background: '#f5f3ff',
+                  }} onClick={startEdit}>
+                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                    Edit
+                  </button>
+                )}
+
                 <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={handleCopy}>
                   <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   Copy
@@ -464,11 +531,78 @@ export default function OutputBox({ result, loading, toolName = 'output', icon, 
                 </button>
               </>
             )}
+
+            {/* Edit mode toolbar */}
+            {editing && (
+              <>
+                <button className="btn" style={{
+                  padding: '6px 16px', fontSize: 12, fontWeight: 700,
+                  background: '#7c3aed', color: '#fff',
+                  borderRadius: 8, border: 'none',
+                  boxShadow: '0 2px 8px rgba(124,58,237,0.3)',
+                }} onClick={saveEdit}>
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  Save
+                </button>
+
+                <button className="btn btn-ghost" style={{
+                  padding: '6px 12px', fontSize: 12, color: '#64748b',
+                }} onClick={cancelEdit}>
+                  Cancel
+                </button>
+
+                <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={handleCopy}>
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  Copy
+                </button>
+
+                <button className="btn btn-ghost" onClick={handleDownloadTxt}
+                  style={{ padding: '6px 12px', fontSize: 12, color: '#16a34a', borderColor: '#bbf7d0' }}>
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  TXT
+                </button>
+
+                <button className="btn btn-ghost" onClick={handleDownloadPDF} disabled={pdfLoading}
+                  style={{ padding: '6px 12px', fontSize: 12, color: '#dc2626', borderColor: '#fecaca', opacity: pdfLoading ? 0.6 : 1 }}>
+                  {pdfLoading
+                    ? <div style={{ width: 12, height: 12, border: '2px solid #fecaca', borderTopColor: '#dc2626', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                    : <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  }
+                  PDF
+                </button>
+              </>
+            )}
           </div>
         </div>
 
+        {/* Edit mode hint bar */}
+        {editing && (
+          <div style={{
+            padding: '6px 20px',
+            background: 'linear-gradient(90deg, #faf5ff, #f5f3ff)',
+            borderBottom: '1px solid #ede9fe',
+            display: 'flex', alignItems: 'center', gap: 16,
+            fontSize: '0.72rem', color: '#7c3aed', fontWeight: 500,
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <kbd style={{ background: '#ede9fe', padding: '1px 5px', borderRadius: 4, fontSize: '0.68rem', fontWeight: 700, fontFamily: 'monospace' }}>Ctrl+S</kbd> Save
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <kbd style={{ background: '#ede9fe', padding: '1px 5px', borderRadius: 4, fontSize: '0.68rem', fontWeight: 700, fontFamily: 'monospace' }}>Esc</kbd> Cancel
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <kbd style={{ background: '#ede9fe', padding: '1px 5px', borderRadius: 4, fontSize: '0.68rem', fontWeight: 700, fontFamily: 'monospace' }}>Tab</kbd> Indent
+            </span>
+            <span style={{ marginLeft: 'auto', color: '#a78bfa', fontSize: '0.7rem' }}>
+              Edit markdown directly — changes reflect in preview, PDF & downloads
+            </span>
+          </div>
+        )}
+
         {/* Scrollable content */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '28px 28px', scrollbarWidth: 'thin', scrollbarColor: '#bfdbfe transparent' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: editing ? 0 : '28px 28px', scrollbarWidth: 'thin', scrollbarColor: '#bfdbfe transparent' }}>
           {isEmpty && (
             <div className="output-placeholder">
               <div className="output-placeholder-icon">
@@ -486,10 +620,34 @@ export default function OutputBox({ result, loading, toolName = 'output', icon, 
               <p>Generating with AI…</p>
             </div>
           )}
-          {result && !loading && (
+          {result && !loading && !editing && (
             <div style={{ animation: 'fadeUp 0.4s ease' }}>
               <RenderedOutput text={result} />
             </div>
+          )}
+          {editing && (
+            <textarea
+              ref={editRef}
+              value={editText}
+              onChange={e => setEditText(e.target.value)}
+              onKeyDown={handleEditorKey}
+              spellCheck={false}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                padding: '20px 24px',
+                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+                fontSize: '0.84rem',
+                lineHeight: 1.9,
+                color: '#1e293b',
+                background: '#fefefe',
+                caretColor: '#7c3aed',
+                tabSize: 2,
+              }}
+            />
           )}
         </div>
       </div>

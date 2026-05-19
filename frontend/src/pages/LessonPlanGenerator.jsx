@@ -540,7 +540,7 @@ export default function LessonPlanGenerator() {
         <div style={{ height: PAGE_H, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} className="fade-up-1">
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <OutputBox result={result} loading={loading} toolName="lesson plan" onClear={clearResult}
+              <OutputBox result={result} loading={loading} toolName="lesson plan" onClear={clearResult} onEdit={saveResult}
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>}
               />
             </div>

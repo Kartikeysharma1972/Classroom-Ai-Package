@@ -218,6 +218,7 @@ export default function QuestionPaperGenerator() {
   const usageCounterRef         = useRef(null)
   const [paper, setPaper]       = useState(null)
   const [mode, setMode]         = useState('setup') // setup | paper
+  const [qpEditing, setQpEditing] = useState(false)
 
   // Derived
   const coreSubjects = useMemo(() => getCoreSubjects(grade), [grade])
@@ -288,6 +289,25 @@ export default function QuestionPaperGenerator() {
           response_content: JSON.stringify(data) }) }) } catch {}
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
+  }
+
+  // ── Edit helpers for question paper ──
+  const updateQuestion = (idx, field, value) => {
+    const updated = { ...paper, questions: paper.questions.map((q, i) => i === idx ? { ...q, [field]: value } : q) }
+    setPaper(updated)
+  }
+  const updateOption = (qIdx, optIdx, value) => {
+    const updated = { ...paper, questions: paper.questions.map((q, i) => {
+      if (i !== qIdx) return q
+      const opts = [...q.options]; opts[optIdx] = value
+      return { ...q, options: opts }
+    })}
+    setPaper(updated)
+  }
+  const updatePaperTitle = (value) => setPaper({ ...paper, title: value })
+  const deleteQuestion = (idx) => {
+    const updated = { ...paper, questions: paper.questions.filter((_, i) => i !== idx) }
+    setPaper(updated)
   }
 
   const handleDownloadPDF = () => {
@@ -389,38 +409,114 @@ export default function QuestionPaperGenerator() {
       <div style={{ maxWidth: 800, margin: '0 auto', padding: '32px 20px' }}>
         {/* Top bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: '1.15rem', color: 'var(--text-1)' }}>{paper.title}</div>
+          <div style={{ flex: 1 }}>
+            {qpEditing ? (
+              <input value={paper.title} onChange={e => updatePaperTitle(e.target.value)}
+                style={{ fontWeight: 800, fontSize: '1.15rem', color: 'var(--text-1)', border: '1.5px solid #c4b5fd', borderRadius: 8, padding: '4px 10px', width: '100%', outline: 'none', background: '#faf5ff', fontFamily: 'inherit' }} />
+            ) : (
+              <div style={{ fontWeight: 800, fontSize: '1.15rem', color: 'var(--text-1)' }}>{paper.title}</div>
+            )}
             <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 2 }}>
               {grade} · {subject} · {difficulty} · {totalMarks} marks
               {mcqCount > 0 && ` · ${mcqCount} MCQ`}{subjCount > 0 && ` · ${subjCount} Subjective`}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            {/* Edit toggle */}
+            <button onClick={() => setQpEditing(e => !e)}
+              style={{
+                padding: '8px 18px', borderRadius: 10,
+                border: qpEditing ? '1.5px solid #c4b5fd' : '1.5px solid #ddd6fe',
+                background: qpEditing ? '#7c3aed' : '#f5f3ff',
+                color: qpEditing ? '#fff' : '#7c3aed',
+                fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+                transition: 'all 0.2s',
+              }}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+              {qpEditing ? 'Done Editing' : 'Edit'}
+            </button>
+
             <button onClick={handleDownloadPDF} disabled={pdfLoading}
               style={{ padding: '8px 18px', borderRadius: 10, border: '1.5px solid #fecaca', background: 'transparent', color: '#dc2626', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {pdfLoading ? '⏳ Preparing…' : '📄 Download PDF'}
+              {pdfLoading ? 'Preparing...' : 'Download PDF'}
             </button>
-            <button onClick={() => { setMode('setup'); setPaper(null) }}
+            <button onClick={() => { setMode('setup'); setPaper(null); setQpEditing(false) }}
               style={{ padding: '8px 18px', borderRadius: 10, border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text-2)', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
-              📝 New Paper
+              New Paper
             </button>
           </div>
         </div>
 
+        {/* Edit mode hint */}
+        {qpEditing && (
+          <div style={{
+            padding: '10px 16px', marginBottom: 16, borderRadius: 10,
+            background: 'linear-gradient(90deg, #faf5ff, #f5f3ff)',
+            border: '1.5px solid #ede9fe',
+            display: 'flex', alignItems: 'center', gap: 10,
+            fontSize: '0.78rem', color: '#7c3aed', fontWeight: 500,
+          }}>
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            Click on any text to edit it. Changes are saved automatically and will be reflected in PDF downloads.
+            <span style={{ marginLeft: 'auto', color: '#a78bfa', fontSize: '0.72rem' }}>Click "Done Editing" when finished</span>
+          </div>
+        )}
+
         {/* Questions */}
         <div style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
           {(paper.questions || []).map((q, i) => (
-            <div key={q.id || i} style={{ padding: '18px 22px', borderBottom: i < paper.questions.length - 1 ? '1px solid var(--border)' : 'none' }}>
+            <div key={q.id || i} style={{
+              padding: '18px 22px',
+              borderBottom: i < paper.questions.length - 1 ? '1px solid var(--border)' : 'none',
+              background: qpEditing ? '#fefce8' + '08' : 'transparent',
+              transition: 'background 0.2s',
+            }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <div style={{ display: 'flex', gap: 10, flex: 1 }}>
                   <span style={{ background: q.type === 'mcq' ? '#dbeafe' : '#fef3c7', color: q.type === 'mcq' ? '#1d4ed8' : '#92400e',
                     padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', height: 'fit-content' }}>
                     {q.type === 'mcq' ? 'MCQ' : 'Subjective'}
                   </span>
-                  <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: '0.92rem', lineHeight: 1.5 }}>Q{i + 1}. {q.question}</div>
+                  {qpEditing ? (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                      <span style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: '0.92rem', flexShrink: 0 }}>Q{i + 1}.</span>
+                      <textarea value={q.question} onChange={e => updateQuestion(i, 'question', e.target.value)}
+                        rows={2}
+                        style={{
+                          flex: 1, fontWeight: 600, color: 'var(--text-1)', fontSize: '0.92rem', lineHeight: 1.5,
+                          border: '1.5px solid #c4b5fd', borderRadius: 8, padding: '4px 8px',
+                          background: '#faf5ff', fontFamily: 'inherit', resize: 'vertical', outline: 'none',
+                          minHeight: 36,
+                        }} />
+                    </div>
+                  ) : (
+                    <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: '0.92rem', lineHeight: 1.5 }}>Q{i + 1}. {q.question}</div>
+                  )}
                 </div>
-                {q.marks && <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap', marginLeft: 12 }}>{q.marks} Mark{q.marks > 1 ? 's' : ''}</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12, flexShrink: 0 }}>
+                  {qpEditing && (
+                    <input type="number" value={q.marks || 1} min={1} max={10}
+                      onChange={e => updateQuestion(i, 'marks', parseInt(e.target.value) || 1)}
+                      style={{ width: 42, padding: '2px 4px', border: '1.5px solid #c4b5fd', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700, textAlign: 'center', background: '#faf5ff', outline: 'none', fontFamily: 'inherit' }}
+                    />
+                  )}
+                  {q.marks && <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{q.marks} Mark{q.marks > 1 ? 's' : ''}</span>}
+                  {qpEditing && (
+                    <button onClick={() => deleteQuestion(i)} title="Delete question"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#ef4444', opacity: 0.6, transition: 'opacity 0.2s' }}
+                      onMouseEnter={e => e.target.style.opacity = 1} onMouseLeave={e => e.target.style.opacity = 0.6}>
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {q.type === 'mcq' && q.options && (
@@ -428,11 +524,27 @@ export default function QuestionPaperGenerator() {
                   {q.options.map((opt, j) => {
                     const letter = ['A','B','C','D'][j]; const isCorrect = letter === q.correct
                     return (
-                      <div key={letter} style={{ padding: '6px 10px', borderRadius: 8, fontSize: '0.85rem',
-                        background: isCorrect ? '#d1fae5' : 'var(--bg)', border: `1px solid ${isCorrect ? '#10b981' : 'var(--border)'}`,
-                        color: isCorrect ? '#065f46' : 'var(--text-1)', fontWeight: isCorrect ? 600 : 400, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontWeight: 700 }}>{letter})</span> {opt.replace(/^[A-D]\)\s*/i, '')}
-                        {isCorrect && <span style={{ marginLeft: 'auto' }}>✅</span>}
+                      <div key={letter} style={{
+                        padding: '6px 10px', borderRadius: 8, fontSize: '0.85rem',
+                        background: isCorrect ? '#d1fae5' : 'var(--bg)',
+                        border: `1px solid ${qpEditing ? '#c4b5fd' : isCorrect ? '#10b981' : 'var(--border)'}`,
+                        color: isCorrect ? '#065f46' : 'var(--text-1)', fontWeight: isCorrect ? 600 : 400,
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        {qpEditing && (
+                          <button onClick={() => updateQuestion(i, 'correct', letter)} title={`Set ${letter} as correct`}
+                            style={{ background: isCorrect ? '#10b981' : '#e5e7eb', border: 'none', width: 16, height: 16, borderRadius: '50%', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                            {isCorrect && <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3} strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                          </button>
+                        )}
+                        <span style={{ fontWeight: 700 }}>{letter})</span>
+                        {qpEditing ? (
+                          <input value={opt.replace(/^[A-D]\)\s*/i, '')} onChange={e => updateOption(i, j, e.target.value)}
+                            style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.85rem', fontFamily: 'inherit', color: 'inherit', fontWeight: 'inherit', padding: 0 }} />
+                        ) : (
+                          <span>{opt.replace(/^[A-D]\)\s*/i, '')}</span>
+                        )}
+                        {isCorrect && !qpEditing && <span style={{ marginLeft: 'auto' }}>✅</span>}
                       </div>
                     )
                   })}
@@ -441,7 +553,13 @@ export default function QuestionPaperGenerator() {
 
               {q.explanation && (
                 <div style={{ marginTop: 10, marginLeft: 36, padding: '8px 12px', background: '#f0f9ff', borderRadius: 8, fontSize: '0.8rem', color: '#1e40af', lineHeight: 1.5, borderLeft: '3px solid #3b82f6' }}>
-                  💡 {q.explanation}
+                  {qpEditing ? (
+                    <textarea value={q.explanation} onChange={e => updateQuestion(i, 'explanation', e.target.value)}
+                      rows={2}
+                      style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.8rem', fontFamily: 'inherit', color: '#1e40af', resize: 'vertical', lineHeight: 1.5, padding: 0 }} />
+                  ) : (
+                    <span>💡 {q.explanation}</span>
+                  )}
                 </div>
               )}
             </div>
