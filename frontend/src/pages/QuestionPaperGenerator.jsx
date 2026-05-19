@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import ChatHistory from '../components/ChatHistory'
 import UsageCounter from '../components/UsageCounter'
+import { RichTextToolbar } from '../components/OutputBox'
 import { useAuth } from '../context/AuthContext'
 import { GRADES, getCoreSubjects, getMiscSubjects, getCoreTopics, getMiscTopics, findTopicDescription } from '../data/cbseSubjects'
 
@@ -219,6 +220,7 @@ export default function QuestionPaperGenerator() {
   const [paper, setPaper]       = useState(null)
   const [mode, setMode]         = useState('setup') // setup | paper
   const [qpEditing, setQpEditing] = useState(false)
+  const qpEditAreaRef = useRef(null)
 
   // Derived
   const coreSubjects = useMemo(() => getCoreSubjects(grade), [grade])
@@ -451,20 +453,22 @@ export default function QuestionPaperGenerator() {
           </div>
         </div>
 
-        {/* Edit mode hint */}
+        {/* Rich text toolbar for question editing */}
         {qpEditing && (
-          <div style={{
-            padding: '10px 16px', marginBottom: 16, borderRadius: 10,
-            background: 'linear-gradient(90deg, #faf5ff, #f5f3ff)',
-            border: '1.5px solid #ede9fe',
-            display: 'flex', alignItems: 'center', gap: 10,
-            fontSize: '0.78rem', color: '#7c3aed', fontWeight: 500,
-          }}>
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-            </svg>
-            Click on any text to edit it. Changes are saved automatically and will be reflected in PDF downloads.
-            <span style={{ marginLeft: 'auto', color: '#a78bfa', fontSize: '0.72rem' }}>Click "Done Editing" when finished</span>
+          <div style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden', border: '1.5px solid #ede9fe' }}>
+            <RichTextToolbar editorRef={qpEditAreaRef} />
+            <div style={{
+              padding: '6px 14px',
+              background: 'linear-gradient(90deg, #faf5ff, #f5f3ff)',
+              borderTop: '1px solid #ede9fe',
+              display: 'flex', alignItems: 'center', gap: 8,
+              fontSize: '0.72rem', color: '#7c3aed', fontWeight: 500,
+            }}>
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+              Select text in any question below, then use the toolbar to format. Changes reflect in PDF downloads.
+            </div>
           </div>
         )}
 
@@ -486,13 +490,17 @@ export default function QuestionPaperGenerator() {
                   {qpEditing ? (
                     <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                       <span style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: '0.92rem', flexShrink: 0 }}>Q{i + 1}.</span>
-                      <textarea value={q.question} onChange={e => updateQuestion(i, 'question', e.target.value)}
-                        rows={2}
+                      <div
+                        ref={el => { if (i === 0) qpEditAreaRef.current = el }}
+                        contentEditable suppressContentEditableWarning
+                        onBlur={e => updateQuestion(i, 'question', e.target.innerText)}
+                        onFocus={e => { qpEditAreaRef.current = e.target }}
+                        dangerouslySetInnerHTML={{ __html: q.question }}
                         style={{
                           flex: 1, fontWeight: 600, color: 'var(--text-1)', fontSize: '0.92rem', lineHeight: 1.5,
                           border: '1.5px solid #c4b5fd', borderRadius: 8, padding: '4px 8px',
-                          background: '#faf5ff', fontFamily: 'inherit', resize: 'vertical', outline: 'none',
-                          minHeight: 36,
+                          background: '#faf5ff', fontFamily: 'inherit', outline: 'none',
+                          minHeight: 36, cursor: 'text',
                         }} />
                     </div>
                   ) : (
@@ -539,8 +547,11 @@ export default function QuestionPaperGenerator() {
                         )}
                         <span style={{ fontWeight: 700 }}>{letter})</span>
                         {qpEditing ? (
-                          <input value={opt.replace(/^[A-D]\)\s*/i, '')} onChange={e => updateOption(i, j, e.target.value)}
-                            style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.85rem', fontFamily: 'inherit', color: 'inherit', fontWeight: 'inherit', padding: 0 }} />
+                          <span contentEditable suppressContentEditableWarning
+                            onBlur={e => updateOption(i, j, e.target.innerText)}
+                            onFocus={e => { qpEditAreaRef.current = e.target }}
+                            dangerouslySetInnerHTML={{ __html: opt.replace(/^[A-D]\)\s*/i, '') }}
+                            style={{ flex: 1, outline: 'none', fontSize: '0.85rem', fontFamily: 'inherit', color: 'inherit', fontWeight: 'inherit', cursor: 'text', minWidth: 40 }} />
                         ) : (
                           <span>{opt.replace(/^[A-D]\)\s*/i, '')}</span>
                         )}
@@ -554,9 +565,11 @@ export default function QuestionPaperGenerator() {
               {q.explanation && (
                 <div style={{ marginTop: 10, marginLeft: 36, padding: '8px 12px', background: '#f0f9ff', borderRadius: 8, fontSize: '0.8rem', color: '#1e40af', lineHeight: 1.5, borderLeft: '3px solid #3b82f6' }}>
                   {qpEditing ? (
-                    <textarea value={q.explanation} onChange={e => updateQuestion(i, 'explanation', e.target.value)}
-                      rows={2}
-                      style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.8rem', fontFamily: 'inherit', color: '#1e40af', resize: 'vertical', lineHeight: 1.5, padding: 0 }} />
+                    <span contentEditable suppressContentEditableWarning
+                      onBlur={e => updateQuestion(i, 'explanation', e.target.innerText)}
+                      onFocus={e => { qpEditAreaRef.current = e.target }}
+                      dangerouslySetInnerHTML={{ __html: q.explanation }}
+                      style={{ display: 'block', width: '100%', outline: 'none', fontSize: '0.8rem', fontFamily: 'inherit', color: '#1e40af', lineHeight: 1.5, cursor: 'text', minHeight: 20 }} />
                   ) : (
                     <span>💡 {q.explanation}</span>
                   )}
