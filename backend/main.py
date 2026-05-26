@@ -2075,6 +2075,108 @@ Rules:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─── CODE DEBUGGER ────────────────────────────────────
+
+class CodeDebugRequest(BaseModel):
+    code: str
+    language: str = "auto-detect"
+
+@app.post("/api/debug-code")
+def debug_code(req: CodeDebugRequest):
+    if not req.code.strip():
+        raise HTTPException(status_code=400, detail="Code is required.")
+
+    system_prompt = (
+        "You are an expert programming tutor for school teachers and students. "
+        "Analyze the given code and identify bugs, errors, or improvements. "
+        "Return a strict JSON object with these keys: "
+        "language (detected language as a string), "
+        "errors_found (array of short error descriptions in plain language), "
+        "fixes_applied (array of short fix descriptions corresponding to each error), "
+        "explanation (one paragraph summary in simple, student-friendly language), "
+        "debugged_code (the corrected version of the full code with proper formatting and newlines). "
+        "If the code is already clean and has no bugs, return empty arrays for errors_found and fixes_applied "
+        "and an explanation saying the code looks correct. "
+        "Output ONLY valid JSON. No markdown, no fences, no extra text."
+    )
+    lang_hint = f"Language hint from user: {req.language}\n\n" if req.language and req.language != "auto-detect" else ""
+    user_prompt = f"{lang_hint}Analyze and fix this code:\n\n```\n{req.code}\n```"
+
+    raw = call_openai(system_prompt, user_prompt, max_tokens=3000, temperature=0.3)
+
+    try:
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```", 2)[-1].lstrip("json").strip()
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3].strip()
+        data = json.loads(cleaned)
+        data.setdefault("original_code", req.code)
+        data.setdefault("errors_found", [])
+        data.setdefault("fixes_applied", [])
+        data.setdefault("debugged_code", req.code)
+        data.setdefault("language", req.language or "Unknown")
+        data.setdefault("explanation", "")
+        return data
+    except Exception:
+        return {
+            "original_code": req.code,
+            "debugged_code": req.code,
+            "language": req.language or "Unknown",
+            "errors_found": [],
+            "fixes_applied": [],
+            "explanation": raw[:1500],
+        }
+
+
+# ─── FEEDBACK GENERATOR ────────────────────────────────
+
+class FeedbackRequest(BaseModel):
+    student_name: str
+    grade_level: str
+    feedback_type: str = "general"
+    tone: str = "encouraging"
+    ratings: dict | None = None
+    context: str = ""
+
+@app.post("/api/generate-feedback")
+def generate_feedback(req: FeedbackRequest):
+    if not req.student_name.strip():
+        raise HTTPException(status_code=400, detail="Student name is required.")
+
+    rating_lines = ""
+    if req.ratings:
+        rating_lines = "\n".join([f"- {k}: {v}/5" for k, v in req.ratings.items()])
+
+    system_prompt = (
+        "You are an experienced school teacher writing personalized feedback for an individual student. "
+        "The feedback should be specific, professional, warm, and reflect the chosen tone. "
+        "Keep it 120–180 words. Address the student by first name. "
+        "Mention strengths first, then 1–2 specific areas for growth, then a closing encouragement. "
+        "Avoid generic phrases like 'good job'. Make it sound like a caring real teacher wrote it. "
+        "Return only the feedback paragraph as plain text."
+    )
+
+    user_prompt = (
+        f"Student: {req.student_name}\n"
+        f"Grade level: {req.grade_level}\n"
+        f"Feedback type: {req.feedback_type}\n"
+        f"Tone: {req.tone}\n"
+        f"Ratings (out of 5):\n{rating_lines or 'Not provided'}\n"
+        f"Extra context from teacher: {req.context or 'None'}\n\n"
+        "Write the feedback now."
+    )
+
+    text = call_openai(system_prompt, user_prompt, max_tokens=600, temperature=0.7)
+    return {
+        "student_name": req.student_name,
+        "grade_level": req.grade_level,
+        "feedback_type": req.feedback_type,
+        "tone": req.tone,
+        "generated_feedback": text.strip(),
+    }
+
+
 # ─── SERVE FRONTEND ────────────────────────────────────
 
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"

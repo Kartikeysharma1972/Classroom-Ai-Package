@@ -11,6 +11,8 @@ import LessonPlanGenerator from './pages/LessonPlanGenerator'
 import TeacherInsights from './pages/TeacherInsights'
 import QuestionPaperGenerator from './pages/QuestionPaperGenerator'
 import ClassActivityGenerator from './pages/ClassActivityGenerator'
+import CodeDebugger from './pages/CodeDebugger'
+import FeedbackSummarizer from './pages/FeedbackSummarizer'
 
 function ProtectedLayout() {
   const { user, loading } = useAuth()
@@ -64,6 +66,8 @@ export default function App() {
           <Route path="/class-activity" element={<ClassActivityGenerator />} />
           <Route path="/teacher-insights" element={<TeacherInsights />} />
           <Route path="/question-paper" element={<QuestionPaperGenerator />} />
+          <Route path="/code-debugger" element={<CodeDebugger />} />
+          <Route path="/feedback" element={<FeedbackSummarizer />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/landing" />} />
