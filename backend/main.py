@@ -428,7 +428,11 @@ def generate_worksheet(req: WorksheetRequest):
         "Use proper markdown formatting: # for title, ## for sections, **bold** for key terms, numbered lists for questions, - for bullets."
     )
 
-    result = call_openai(system_prompt, user_prompt, max_tokens=4096)
+    # Scale token budget with question count so answer keys never truncate.
+    # Each question + answer ~ 350-450 tokens; add 600 for title/instructions/word bank.
+    qcount = max(1, int(req.num_questions or 10))
+    worksheet_tokens = min(8000, max(4096, 600 + qcount * 420))
+    result = call_openai(system_prompt, user_prompt, max_tokens=worksheet_tokens)
     return {"result": result, "tool": "worksheet"}
 
 
@@ -532,8 +536,13 @@ def generate_lesson_plan(req: LessonPlanRequest):
         "You are an expert teacher writing a lesson plan that another teacher can walk into "
         "class and teach from directly. You always include ACTUAL solved examples with numbers "
         "and step-by-step working. You never write generic descriptions — you write the real "
-        "content. Format with clean markdown: # for title, ## for section headers, ### for sub-sections, "
-        "**bold** for key terms, numbered lists for steps, - for bullet points, --- for dividers. "
+        "content.\n\n"
+        "OUTPUT FORMAT (STRICT):\n"
+        "- Respond in CLEAN MARKDOWN ONLY. Never emit JSON, HTML tags, code fences around the whole output, or placeholder brackets like [TO BE FILLED].\n"
+        "- Use # for the main title, ## for major section headers, ### for sub-sections.\n"
+        "- Use **bold** for key terms, numbered lists for steps, - for bullet points, --- for dividers.\n"
+        "- For math: write equations inline as plain text (e.g. x^2 + 2x + 1). NO LaTeX delimiters like $$ or \\(...\\).\n"
+        "- Every placeholder you see in the prompt (anything in [square brackets]) MUST be replaced with concrete content. Never leave brackets in the output.\n\n"
         f"{lang_profile}"
     )
 
@@ -683,7 +692,7 @@ def generate_lesson_plan(req: LessonPlanRequest):
             "Use ## for section headers, **bold** for terms, - for bullet points."
         )
 
-        topic_overview = call_openai(topic_system, topic_prompt, max_tokens=1500, temperature=0.3)
+        topic_overview = call_openai(topic_system, topic_prompt, max_tokens=2400, temperature=0.3)
         result = (
             "=== TEACHER QUICK REFERENCE ===\n\n"
             + topic_overview
@@ -749,9 +758,12 @@ def enrich_lesson_plan(req: LessonPlanEnrichRequest):
 
     system_prompt = (
         "You are a senior NCERT-aligned teacher and curriculum designer. "
-        "Extend an existing lesson plan with new, non-overlapping, classroom-ready content. "
-        "Format with markdown: ## for section headers, ### for sub-sections, **bold** for key terms, "
-        "numbered lists for questions, - for bullets. Model all questions and solutions on NCERT textbook style."
+        "Extend an existing lesson plan with new, non-overlapping, classroom-ready content.\n\n"
+        "OUTPUT FORMAT (STRICT):\n"
+        "- Respond in CLEAN MARKDOWN ONLY. No JSON, no LaTeX delimiters ($$ or \\[...]), no code fences around the whole output, no placeholder brackets.\n"
+        "- Use ## for section headers, ### for sub-sections, **bold** for key terms, numbered lists for questions, - for bullets.\n"
+        "- For math, write equations inline as plain text (e.g. x = (-b ± √(b²-4ac)) / 2a).\n"
+        "- Model all questions and solutions on NCERT textbook style with real numbers and worked steps."
     )
 
     user_prompt = (
@@ -767,7 +779,9 @@ def enrich_lesson_plan(req: LessonPlanEnrichRequest):
         "Output ONLY this new section with clean markdown formatting."
     )
 
-    addition = call_openai(system_prompt, user_prompt, max_tokens=1800)
+    # "more_topics" requires deeply nested content per subtopic — bump budget.
+    enrich_tokens = 3000 if req.action == "more_topics" else 2200
+    addition = call_openai(system_prompt, user_prompt, max_tokens=enrich_tokens)
     return {"result": addition, "tool": "lesson-plan", "action": req.action}
 
 
@@ -819,14 +833,19 @@ def generate_mc_assessment(req: MCAssessmentRequest):
     lang_profile = get_grade_language_profile(req.grade_level)
 
     system_prompt = (
-        "You are an expert assessment designer. Create rigorous, fair assessments with "
-        "SPECIFIC, SCENARIO-BASED questions — not generic recall questions. "
-        "Every distractor must be plausible (common student mistakes). "
-        "No trick questions, no double negatives, no 'all of the above'. "
+        "You are an expert CBSE assessment designer with 15+ years of experience writing board-quality papers. "
+        "You create rigorous, fair assessments with SPECIFIC, SCENARIO-BASED questions — never generic recall.\n\n"
+        "DISTRACTOR QUALITY (CRITICAL):\n"
+        "- Every wrong option MUST reflect a specific, realistic student misconception or computational error "
+        "(e.g. forgot to convert units, used wrong formula, made sign error, confused two similar concepts).\n"
+        "- Wrong options must be the SAME LENGTH and SAME GRAMMATICAL FORM as the correct one — never give the answer away by formatting.\n"
+        "- Never use 'all of the above', 'none of the above', double negatives, or trivially wrong options.\n"
+        "- If the curriculum-specific detail is unclear, prioritise logical and real-world accuracy over inventing exam formats.\n\n"
+        "OUTPUT FORMAT (STRICT):\n"
+        "- Respond in CLEAN MARKDOWN ONLY. No JSON, no LaTeX delimiters, no leftover [brackets].\n"
+        "- Use # for title, ## for sections, **bold** for key terms, numbered lists for questions, - for bullets.\n"
         f"{lang_profile} "
         + ("ALL questions must come directly from the provided source material. " if req.source_material.strip() else "")
-        + "Format with clean markdown: # for title, ## for sections, **bold** for key terms, "
-        "numbered lists for questions, - for bullet points."
     )
 
     user_prompt = (
@@ -856,7 +875,10 @@ def generate_mc_assessment(req: MCAssessmentRequest):
         "Use markdown: # for title, ## for sections, **bold** for important terms, numbered lists for questions."
     )
 
-    result = call_openai(system_prompt, user_prompt, max_tokens=4096)
+    # Scale token budget with question count — MCQ + 4 distractors + explanation ~ 350-450 tokens.
+    qcount = max(1, int(req.num_questions or 10))
+    mc_tokens = min(8000, max(4500, 700 + qcount * 380))
+    result = call_openai(system_prompt, user_prompt, max_tokens=mc_tokens)
     return {"result": result, "tool": "mc-assessment"}
 
 
@@ -1022,12 +1044,10 @@ def generate_class_activity(req: ClassActivityRequest):
         "- --- between activities"
     )
 
-    # More tokens for more activities or longer durations
-    max_tok = 3000
-    if req.num_activities >= 4:
-        max_tok = 4000
-    if req.num_activities >= 5:
-        max_tok = 5000
+    # Each activity needs ~ 750-900 tokens (procedure + materials + diff + rubric + reflection).
+    # Underbidding silently truncates the assessment + reflection sections of later activities.
+    n = max(1, int(req.num_activities or 3))
+    max_tok = min(9000, max(3500, 800 + n * 850))
 
     result = call_openai(system_prompt, user_prompt, max_tokens=max_tok)
     return {"result": result, "tool": "class-activity"}
@@ -1959,16 +1979,17 @@ Return ONLY valid JSON (no markdown, no code fences):
 Rules:
 {type_rules}"""
 
-    # More tokens for paper mode and more questions — subjective needs more
-    max_tok = 2000
-    if request.question_type in ("subjective", "mix"):
-        max_tok = 3000
-    if request.num_questions > 10:
-        max_tok = max(max_tok, 3500)
-    if request.num_questions > 20:
-        max_tok = max(max_tok, 5000)
+    # Scale tokens with question count + type. Subjective answers are ~3x longer than MCQ.
+    # Underbidding silently truncates the last 3-5 questions, then the repair regex fakes a "complete" result.
+    n = max(1, int(request.num_questions or 10))
+    if request.question_type == "subjective":
+        max_tok = min(8000, max(2500, 500 + n * 320))
+    elif request.question_type == "mix":
+        max_tok = min(8000, max(2500, 500 + n * 260))
+    else:  # mcq
+        max_tok = min(8000, max(2000, 400 + n * 180))
     if request.paper_mode:
-        max_tok = max(max_tok, 4000)
+        max_tok = max(max_tok, 4500)
 
     try:
         completion = client.chat.completions.create(
@@ -1982,6 +2003,16 @@ Rules:
         text = completion.choices[0].message.content.strip()
         text = _re.sub(r'^```[a-z]*\s*', '', text)
         text = _re.sub(r'\s*```$', '', text).strip()
+        # Normalize smart quotes that LLMs sometimes emit when teachers paste from Google Docs.
+        # These break JSON parsing AND corrupt the unescaped-newline repair regex (attempt #3).
+        smart_quote_map = {
+            "“": '"', "”": '"',  # curly double quotes
+            "‘": "'", "’": "'",  # curly single quotes
+            "–": "-", "—": "-",  # en-dash, em-dash
+            " ": " ",                  # non-breaking space
+        }
+        for src, dst in smart_quote_map.items():
+            text = text.replace(src, dst)
 
         # Robust JSON repair: LLMs sometimes produce trailing commas, unescaped chars, or truncated output
         def _repair_json(raw: str) -> dict:
@@ -2081,51 +2112,89 @@ class CodeDebugRequest(BaseModel):
     code: str
     language: str = "auto-detect"
 
+def _strip_json_fences(text: str) -> str:
+    """Robustly strip markdown code fences around a JSON payload.
+    Handles 1-4 backticks, optional 'json' language hint, leading/trailing whitespace."""
+    import re
+    s = text.strip()
+    # Try to extract content between fenced blocks of 3+ backticks.
+    m = re.search(r"`{3,}\s*(?:json|JSON)?\s*\n([\s\S]*?)\n`{3,}", s)
+    if m:
+        return m.group(1).strip()
+    # No proper fences — just strip any leading/trailing backticks and the word 'json'.
+    s = re.sub(r"^`+\s*(?:json|JSON)?\s*", "", s)
+    s = re.sub(r"\s*`+\s*$", "", s)
+    return s.strip()
+
+
 @app.post("/api/debug-code")
 def debug_code(req: CodeDebugRequest):
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="Code is required.")
 
+    # Reject pathologically large inputs to keep responses fast and avoid truncation.
+    line_count = req.code.count("\n") + 1
+    if len(req.code) > 25000 or line_count > 600:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Code too large ({line_count} lines, {len(req.code)} chars). "
+                   "Please paste under 600 lines or 25,000 characters at a time."
+        )
+
     system_prompt = (
-        "You are an expert programming tutor for school teachers and students. "
-        "Analyze the given code and identify bugs, errors, or improvements. "
-        "Return a strict JSON object with these keys: "
-        "language (detected language as a string), "
-        "errors_found (array of short error descriptions in plain language), "
-        "fixes_applied (array of short fix descriptions corresponding to each error), "
-        "explanation (one paragraph summary in simple, student-friendly language), "
-        "debugged_code (the corrected version of the full code with proper formatting and newlines). "
-        "If the code is already clean and has no bugs, return empty arrays for errors_found and fixes_applied "
-        "and an explanation saying the code looks correct. "
-        "Output ONLY valid JSON. No markdown, no fences, no extra text."
+        "You are an expert programming tutor for school teachers and CS students. "
+        "Your job: analyse the given code, identify ALL bugs (syntax + logical + edge cases + style), and produce a learner-friendly fix.\n\n"
+        "RULES:\n"
+        "- Be precise: each 'error' must name the specific symptom (e.g. 'Missing colon at end of function definition' — not 'syntax error').\n"
+        "- Each 'fix' must correspond 1-to-1 with the same-index 'error' and explain WHAT was changed in plain English.\n"
+        "- 'explanation' must be one short paragraph (2-3 sentences) — start with the headline finding, then the why, in language a Class 10 student could follow.\n"
+        "- 'debugged_code' MUST be the complete corrected file with proper newlines and 4-space indentation. Never abbreviate with '...'.\n"
+        "- If the code is already correct, return empty arrays and a positive explanation; do NOT invent issues.\n"
+        "- Detect the language accurately. Use canonical names: 'Python', 'JavaScript', 'C++', 'Java', etc.\n\n"
+        "OUTPUT FORMAT (STRICT):\n"
+        "Return ONE valid JSON object with EXACTLY these keys: language (string), errors_found (array of strings), "
+        "fixes_applied (array of strings, same length as errors_found), explanation (string), debugged_code (string). "
+        "No markdown, no code fences, no commentary before or after the JSON. The very first character must be '{' and the last must be '}'."
     )
     lang_hint = f"Language hint from user: {req.language}\n\n" if req.language and req.language != "auto-detect" else ""
-    user_prompt = f"{lang_hint}Analyze and fix this code:\n\n```\n{req.code}\n```"
+    user_prompt = f"{lang_hint}Analyze and fix this code. Return JSON only.\n\nCODE:\n{req.code}"
 
-    raw = call_openai(system_prompt, user_prompt, max_tokens=3000, temperature=0.3)
+    # Scale token budget with input size so debugged_code can hold the full corrected file.
+    # debugged_code roughly = input length × 1.2 (with annotations); buffer for errors/fixes/explanation.
+    debug_tokens = min(8000, max(2400, 800 + line_count * 18))
+    raw = call_openai(system_prompt, user_prompt, max_tokens=debug_tokens, temperature=0.2)
 
     try:
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```", 2)[-1].lstrip("json").strip()
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3].strip()
+        cleaned = _strip_json_fences(raw)
         data = json.loads(cleaned)
-        data.setdefault("original_code", req.code)
-        data.setdefault("errors_found", [])
-        data.setdefault("fixes_applied", [])
-        data.setdefault("debugged_code", req.code)
-        data.setdefault("language", req.language or "Unknown")
-        data.setdefault("explanation", "")
-        return data
-    except Exception:
+        # Validate + coerce shape
+        errors = data.get("errors_found") or []
+        fixes  = data.get("fixes_applied") or []
+        if not isinstance(errors, list): errors = [str(errors)]
+        if not isinstance(fixes, list): fixes = [str(fixes)]
+        # Pad fixes if model returned mismatched lengths
+        while len(fixes) < len(errors):
+            fixes.append("Fix applied automatically.")
+        return {
+            "original_code": req.code,
+            "language": str(data.get("language") or req.language or "Unknown"),
+            "errors_found": [str(e) for e in errors],
+            "fixes_applied": [str(f) for f in fixes][:len(errors) or len(fixes)],
+            "explanation": str(data.get("explanation") or "").strip(),
+            "debugged_code": str(data.get("debugged_code") or req.code),
+        }
+    except (json.JSONDecodeError, ValueError, AttributeError):
+        # Surface a useful error explanation rather than silently returning the prompt as content.
         return {
             "original_code": req.code,
             "debugged_code": req.code,
             "language": req.language or "Unknown",
             "errors_found": [],
             "fixes_applied": [],
-            "explanation": raw[:1500],
+            "explanation": (
+                "AI returned a malformed response. This sometimes happens with very long or unusual code. "
+                "Try debugging a smaller snippet, or rerun the request."
+            ),
         }
 
 
@@ -2143,37 +2212,81 @@ class FeedbackRequest(BaseModel):
 def generate_feedback(req: FeedbackRequest):
     if not req.student_name.strip():
         raise HTTPException(status_code=400, detail="Student name is required.")
+    if not req.grade_level.strip():
+        raise HTTPException(status_code=400, detail="Grade level is required.")
 
+    # Validate + summarize ratings so the AI can reason about strengths vs. growth areas.
     rating_lines = ""
+    strengths, growth_areas = [], []
     if req.ratings:
-        rating_lines = "\n".join([f"- {k}: {v}/5" for k, v in req.ratings.items()])
+        clean = {}
+        for k, v in req.ratings.items():
+            try:
+                iv = int(v)
+                if 1 <= iv <= 5:
+                    clean[str(k)] = iv
+            except (TypeError, ValueError):
+                # Silently skip non-numeric values rather than confusing the AI.
+                continue
+        if clean:
+            rating_lines = "\n".join([f"- {k}: {v}/5" for k, v in clean.items()])
+            strengths    = [k for k, v in clean.items() if v >= 4]
+            growth_areas = [k for k, v in clean.items() if v <= 3]
+    if not rating_lines:
+        rating_lines = "Not provided"
+
+    tone_guides = {
+        "encouraging":  "warm, motivating, future-focused. Celebrate effort and progress.",
+        "constructive": "balanced and direct. Specific praise paired with specific growth steps.",
+        "formal":       "polished and professional, suitable for a printed report card.",
+        "warm":         "personal and caring, like a teacher who knows the student well.",
+        "professional": "concise, measured, and observation-based with concrete examples.",
+    }
+    tone_guide = tone_guides.get((req.tone or "").lower(), tone_guides["encouraging"])
+
+    strengths_hint = f"High-rated areas (write strengths around these first): {', '.join(strengths)}." if strengths else ""
+    growth_hint    = f"Lower-rated areas (suggest growth here): {', '.join(growth_areas)}." if growth_areas else ""
 
     system_prompt = (
-        "You are an experienced school teacher writing personalized feedback for an individual student. "
-        "The feedback should be specific, professional, warm, and reflect the chosen tone. "
-        "Keep it 120–180 words. Address the student by first name. "
-        "Mention strengths first, then 1–2 specific areas for growth, then a closing encouragement. "
-        "Avoid generic phrases like 'good job'. Make it sound like a caring real teacher wrote it. "
-        "Return only the feedback paragraph as plain text."
+        "You are a thoughtful school teacher writing personalised end-of-term feedback for ONE student. "
+        "Your feedback feels human, specific, and never generic.\n\n"
+        "WRITING RULES:\n"
+        "- Address the student by FIRST NAME only.\n"
+        "- Length: 110-170 words. One flowing paragraph (not bullet points, not multiple paragraphs).\n"
+        "- Structure: (1) Open with a specific strength tied to a behaviour, (2) acknowledge effort or growth area, "
+        "(3) one concrete suggestion for next term, (4) warm closing.\n"
+        "- NEVER use clichés like 'good job', 'keep it up', 'continue the good work', 'I am happy to say'.\n"
+        "- Reference the rated areas naturally — do NOT list ratings or scores in the text.\n"
+        "- Match the requested tone exactly.\n\n"
+        "OUTPUT FORMAT (STRICT):\n"
+        "Return ONLY the feedback paragraph as plain text. No JSON, no bullet points, no markdown headers, no '**bold**' tags, "
+        "no preamble like 'Here is the feedback:'. Just the paragraph itself."
     )
 
     user_prompt = (
-        f"Student: {req.student_name}\n"
+        f"Student first name: {req.student_name.split()[0]}\n"
+        f"Full name (for context only, do not repeat in feedback): {req.student_name}\n"
         f"Grade level: {req.grade_level}\n"
-        f"Feedback type: {req.feedback_type}\n"
-        f"Tone: {req.tone}\n"
-        f"Ratings (out of 5):\n{rating_lines or 'Not provided'}\n"
-        f"Extra context from teacher: {req.context or 'None'}\n\n"
-        "Write the feedback now."
+        f"Feedback focus area: {req.feedback_type}\n"
+        f"Tone: {req.tone} — {tone_guide}\n"
+        f"Ratings (out of 5, for your reasoning only — do NOT list these in the paragraph):\n{rating_lines}\n"
+        f"{strengths_hint}\n{growth_hint}\n"
+        f"Extra teacher context: {req.context.strip() or 'None'}\n\n"
+        "Write the feedback paragraph now."
     )
 
-    text = call_openai(system_prompt, user_prompt, max_tokens=600, temperature=0.7)
+    text = call_openai(system_prompt, user_prompt, max_tokens=600, temperature=0.75)
+    # Light cleanup: strip stray quotes, markdown, or leading preamble.
+    cleaned = text.strip().strip('"').strip("'")
+    for prefix in ("Feedback:", "Here is the feedback:", "Here's the feedback:"):
+        if cleaned.lower().startswith(prefix.lower()):
+            cleaned = cleaned[len(prefix):].strip()
     return {
         "student_name": req.student_name,
         "grade_level": req.grade_level,
         "feedback_type": req.feedback_type,
         "tone": req.tone,
-        "generated_feedback": text.strip(),
+        "generated_feedback": cleaned,
     }
 
 
