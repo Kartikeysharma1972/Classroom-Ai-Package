@@ -2,7 +2,10 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 const API = window.location.hostname === 'localhost' ? 'http://localhost:8001' : window.location.origin
-const STORAGE_KEY = 'classroom-result-debugger'
+
+// Wipe any legacy persisted result so the debugger always opens fresh.
+// (Previously we persisted to localStorage; the user wants a clean slate per session.)
+try { localStorage.removeItem('classroom-result-debugger') } catch {}
 
 const LANGUAGES = [
   'auto-detect', 'Python', 'JavaScript', 'TypeScript',
@@ -331,9 +334,7 @@ export default function CodeDebugger() {
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('auto-detect')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(() => {
-    try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null } catch { return null }
-  })
+  const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [viewMode, setViewMode] = useState('learn')
   const textareaRef = useRef(null)
@@ -345,10 +346,6 @@ export default function CodeDebugger() {
   const [simpleLoading, setSimpleLoading] = useState(false)
   const [fixApplied, setFixApplied] = useState(false)
   const fileInputRef = useRef(null)
-
-  useEffect(() => {
-    if (result) localStorage.setItem(STORAGE_KEY, JSON.stringify(result))
-  }, [result])
 
   const EXT_TO_LANG = {
     py: 'Python', js: 'JavaScript', ts: 'TypeScript', jsx: 'JavaScript (React)',
@@ -536,7 +533,6 @@ ${runSection}
 
   const handleClear = () => {
     setCode(''); setResult(null); setError(''); setRunOutput(null); setSimpleExp(''); setFixApplied(false)
-    localStorage.removeItem(STORAGE_KEY)
   }
 
   const handleSample = () => {
