@@ -2112,6 +2112,22 @@ class CodeDebugRequest(BaseModel):
     code: str
     language: str = "auto-detect"
 
+class RunCodeRequest(BaseModel):
+    code: str
+    language: str = "auto-detect"
+
+class ExplainSimpleRequest(BaseModel):
+    errors: list[str]
+    fixes: list[str]
+    language: str = "Unknown"
+
+class CSChatMessage(BaseModel):
+    role: str
+    content: str
+
+class CSChatRequest(BaseModel):
+    messages: list[CSChatMessage]
+
 def _strip_json_fences(text: str) -> str:
     """Robustly strip markdown code fences around a JSON payload.
     Handles 1-4 backticks, optional 'json' language hint, leading/trailing whitespace."""
@@ -2196,6 +2212,145 @@ def debug_code(req: CodeDebugRequest):
                 "Try debugging a smaller snippet, or rerun the request."
             ),
         }
+
+
+# ─── RUN CODE (executes Python/JS/TS locally; AI-simulates others) ─────────────
+
+def _detect_lang_from_code(code: str) -> str:
+    s = code.strip()
+    if not s:
+        return "Python"
+    if "#include" in s or ("int main(" in s and ("printf(" in s or "cout" in s)):
+        return "C++" if "cout" in s or "std::" in s else "C"
+    if "public static void main" in s or "System.out.println" in s:
+        return "Java"
+    if s.startswith("<!DOCTYPE") or "<html" in s.lower():
+        return "HTML"
+    if "def " in s and ("print(" in s or ":" in s):
+        return "Python"
+    if "console.log(" in s or ("function " in s and "{" in s):
+        return "JavaScript"
+    if "package main" in s and "func " in s:
+        return "Go"
+    return "Python"
+
+@app.post("/api/run-code")
+def run_code(req: RunCodeRequest):
+    import subprocess, tempfile, shutil, re as _re
+    if not req.code.strip():
+        raise HTTPException(status_code=400, detail="Code cannot be empty")
+
+    code = req.code
+    lang = (req.language or "auto-detect").strip()
+    if lang.lower() in ("auto-detect", ""):
+        lang = _detect_lang_from_code(code)
+    lang_lower = lang.lower()
+
+    # Python: real execution
+    if lang_lower == "python":
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False, encoding="utf-8") as f:
+                f.write(code); tmp_path = f.name
+            try:
+                proc = subprocess.run(
+                    [sys.executable, tmp_path],
+                    capture_output=True, text=True, timeout=10,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+                )
+                return {"output": proc.stdout[:5000], "error": proc.stderr[:2000],
+                        "exit_code": proc.returncode, "language": "Python", "simulated": False}
+            finally:
+                try: os.unlink(tmp_path)
+                except Exception: pass
+        except subprocess.TimeoutExpired:
+            return {"output": "", "error": "Execution timed out (10s limit)", "exit_code": -1, "language": "Python", "simulated": False}
+        except Exception as e:
+            return {"output": "", "error": str(e), "exit_code": -1, "language": "Python", "simulated": False}
+
+    # JS / TS via Node
+    if lang_lower in ("javascript", "javascript (react)", "typescript", "typescript (react)") and shutil.which("node"):
+        run_str = code
+        if "typescript" in lang_lower:
+            run_str = _re.sub(r":\s*\w+(\[\])?", "", run_str)
+            run_str = _re.sub(r"<\w+>", "", run_str)
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False, encoding="utf-8") as f:
+                f.write(run_str); tmp_path = f.name
+            try:
+                proc = subprocess.run(["node", tmp_path], capture_output=True, text=True, timeout=8)
+                return {"output": proc.stdout[:5000], "error": proc.stderr[:2000],
+                        "exit_code": proc.returncode, "language": lang, "simulated": False}
+            finally:
+                try: os.unlink(tmp_path)
+                except Exception: pass
+        except Exception as e:
+            return {"output": "", "error": str(e), "exit_code": -1, "language": lang, "simulated": False}
+
+    # Fallback: AI-simulated execution for compiled / unsupported languages
+    try:
+        sys_prompt = (
+            f"You are a {lang} interpreter. Execute the user's code mentally and output ONLY what the "
+            f"program would print to stdout, line-for-line. If there is a runtime/compile error, show the "
+            f"exact error message instead. No explanations, no markdown, no fences — only the raw output."
+        )
+        out = call_openai(sys_prompt, f"Run this {lang} code and produce its output:\n\n{code}",
+                          max_tokens=600, temperature=0)
+        return {"output": f"[Simulated output — {lang}]\n{out}".strip(),
+                "error": "", "exit_code": 0, "language": lang, "simulated": True}
+    except Exception as e:
+        return {"output": "", "error": f"Could not run {lang}: {e}", "exit_code": -1, "language": lang, "simulated": False}
+
+
+# ─── EXPLAIN SIMPLY ────────────────────────────────────────────────────────────
+
+@app.post("/api/explain-simple")
+def explain_simple(req: ExplainSimpleRequest):
+    if not req.errors:
+        raise HTTPException(status_code=400, detail="No errors to explain")
+    sys_prompt = (
+        "You are a friendly coding mentor for school kids. Explain bugs and fixes "
+        "in the simplest possible way, like talking to a 10-year-old. Use short sentences, "
+        "fun analogies, and be encouraging. Use a few emojis for warmth (not too many)."
+    )
+    user_prompt = (
+        f"A student just had their {req.language} code debugged. "
+        "Explain each bug and how it was fixed in the simplest words possible.\n\n"
+        "Bugs found:\n" + "\n".join(f"- {e}" for e in req.errors) + "\n\n"
+        "Fixes applied:\n" + "\n".join(f"- {f}" for f in req.fixes) + "\n\n"
+        "Keep the whole explanation under 6 short sentences total."
+    )
+    text = call_openai(sys_prompt, user_prompt, max_tokens=500, temperature=0.7)
+    return {"explanation": text.strip()}
+
+
+# ─── CS TUTOR CHAT (CS topics only) ────────────────────────────────────────────
+
+@app.post("/api/cs-tutor")
+def cs_tutor(req: CSChatRequest):
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="No messages provided")
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You are CodeVidhya's CS Tutor — a friendly, expert teacher for Computer Science and Programming. "
+            "You ONLY answer questions about computer science, coding, programming languages, algorithms, "
+            "data structures, software engineering, databases, networks, operating systems, AI/ML basics, "
+            "web development, and closely related technical topics. "
+            "If asked anything UNRELATED to CS, politely reply: \"I'm CodeVidhya's CS Tutor, so I can only help "
+            "with computer science and programming topics. Ask me anything about coding!\" "
+            "Give clear, beginner-friendly answers. Use small examples when helpful. "
+            "Format with short paragraphs and line breaks for readability. "
+            "Never mention which AI model or company powers you. You are CodeVidhya's CS Tutor — that's it."
+        )
+    }
+    msgs = [system_msg] + [{"role": m.role, "content": m.content} for m in req.messages]
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL, messages=msgs, temperature=0.5, max_tokens=900,
+        )
+        return {"reply": resp.choices[0].message.content.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tutor error: {e}")
 
 
 # ─── FEEDBACK GENERATOR ────────────────────────────────
