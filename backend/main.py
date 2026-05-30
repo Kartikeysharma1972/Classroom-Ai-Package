@@ -2143,12 +2143,56 @@ def _strip_json_fences(text: str) -> str:
     return s.strip()
 
 
+def _call_openai_json(system_prompt: str, user_prompt: str, max_tokens: int = 4096, temperature: float = 0.1) -> dict:
+    """Call the LLM forcing JSON output. Repairs/retries if parsing fails.
+    Returns a dict — never raises on parse failure (returns {} instead)."""
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content.strip()
+    except Exception:
+        # Some providers reject response_format — fall back to plain mode.
+        try:
+            resp = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt + "\n\nReturn ONLY a valid JSON object — first character '{' and last '}'."},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            raw = resp.choices[0].message.content.strip()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"AI error: {e}")
+
+    cleaned = _strip_json_fences(raw)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Last-resort: try to slice the first {...} block.
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(cleaned[start:end + 1])
+            except json.JSONDecodeError:
+                pass
+    return {}
+
+
 @app.post("/api/debug-code")
 def debug_code(req: CodeDebugRequest):
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="Code is required.")
 
-    # Reject pathologically large inputs to keep responses fast and avoid truncation.
     line_count = req.code.count("\n") + 1
     if len(req.code) > 25000 or line_count > 600:
         raise HTTPException(
@@ -2157,61 +2201,88 @@ def debug_code(req: CodeDebugRequest):
                    "Please paste under 600 lines or 25,000 characters at a time."
         )
 
-    system_prompt = (
-        "You are an expert programming tutor for school teachers and CS students. "
-        "Your job: analyse the given code, identify ALL bugs (syntax + logical + edge cases + style), and produce a learner-friendly fix.\n\n"
+    lang_hint = req.language if req.language and req.language != "auto-detect" else ""
+
+    # ── STAGE 1: deep bug analysis (no full code rewrite — keeps response small + lets the model focus) ──
+    bug_finder_system = (
+        "You are an EXPERT static analyser, code reviewer, and CS tutor. Your ONLY job is to find EVERY bug in the given code. "
+        "You must be exhaustive — find ALL of these categories:\n"
+        "  1. SYNTAX ERRORS — missing colons, brackets, parentheses, indentation, typos in keywords.\n"
+        "  2. LOGIC ERRORS — off-by-one (range(len(x)+1), index 0 vs 1), wrong operator (* instead of +), inverted conditions (% 2 == 1 for even), incorrect return values (0 instead of 1 for factorial base case).\n"
+        "  3. RUNTIME ERRORS — division by zero, IndexError (lst[len(lst)/2], items[len(text)-i]), KeyError (dict missing key), TypeError (str + int, int(non-numeric), uppercase() vs upper()).\n"
+        "  4. INFINITE LOOPS — missing increment inside while, recursion that never reaches base case (recursive_bug(n) → recursive_bug(n)).\n"
+        "  5. API/STDLIB MISUSE — open() in 'r' mode then .write(), json.load(path) instead of json.load(file), .uppercase() instead of .upper(), math.sqrt(negative).\n"
+        "  6. TYPE BUGS — comparing str to int, age='30' breaks age>18, str(b) on list.\n"
+        "  7. DATA BUGS — initializing max with 0 fails for negative-only lists, duplicates kept while claiming to remove them, count_words returning len+1.\n"
+        "  8. RESOURCE BUGS — wrong file mode, dict key not initialized before +=1, opening file without context.\n"
+        "  9. ALGORITHMIC BUGS — power(b,e) = b*e, temperature_convert missing +32, withdraw doubles amount, get_middle uses / not //.\n"
+        " 10. STYLE / ROBUSTNESS — missing input validation, hard-coded edge cases, unused returns.\n\n"
         "RULES:\n"
-        "- Be precise: each 'error' must name the specific symptom (e.g. 'Missing colon at end of function definition' — not 'syntax error').\n"
-        "- Each 'fix' must correspond 1-to-1 with the same-index 'error' and explain WHAT was changed in plain English.\n"
-        "- 'explanation' must be one short paragraph (2-3 sentences) — start with the headline finding, then the why, in language a Class 10 student could follow.\n"
-        "- 'debugged_code' MUST be the complete corrected file with proper newlines and 4-space indentation. Never abbreviate with '...'.\n"
-        "- If the code is already correct, return empty arrays and a positive explanation; do NOT invent issues.\n"
+        "- Walk through the code function by function, line by line. List EVERY bug you find — do not stop early.\n"
+        "- For 200+ lines of buggy code expect 15-40 bugs. NEVER return empty arrays unless the code is truly perfect.\n"
+        "- Each 'error' must be specific: include the function name and what is wrong (e.g. 'factorial(): base case returns 0, so factorial(n) is always 0 — should return 1').\n"
+        "- Each 'fix' (same index) must say exactly WHAT to change in plain English (e.g. 'Change return 0 to return 1 in the base case').\n"
+        "- 'explanation' = one short paragraph (2-3 sentences) summarising the headline issues for a Class 10 student.\n"
         "- Detect the language accurately. Use canonical names: 'Python', 'JavaScript', 'C++', 'Java', etc.\n\n"
-        "OUTPUT FORMAT (STRICT):\n"
-        "Return ONE valid JSON object with EXACTLY these keys: language (string), errors_found (array of strings), "
-        "fixes_applied (array of strings, same length as errors_found), explanation (string), debugged_code (string). "
-        "No markdown, no code fences, no commentary before or after the JSON. The very first character must be '{' and the last must be '}'."
+        "OUTPUT — return a JSON object with EXACTLY these keys:\n"
+        '  { "language": "<name>", "errors_found": ["bug 1", "bug 2", ...], '
+        '"fixes_applied": ["fix for bug 1", "fix for bug 2", ...], "explanation": "<paragraph>" }\n'
+        "errors_found and fixes_applied MUST have the same length and align 1-to-1."
     )
-    lang_hint = f"Language hint from user: {req.language}\n\n" if req.language and req.language != "auto-detect" else ""
-    user_prompt = f"{lang_hint}Analyze and fix this code. Return JSON only.\n\nCODE:\n{req.code}"
+    bug_finder_user = (
+        (f"Language hint: {lang_hint}\n\n" if lang_hint else "") +
+        f"Find ALL bugs in this code. Do not skip anything. Be exhaustive.\n\nCODE:\n```\n{req.code}\n```"
+    )
+    stage1 = _call_openai_json(
+        bug_finder_system, bug_finder_user,
+        max_tokens=4000, temperature=0.1,
+    )
 
-    # Scale token budget with input size so debugged_code can hold the full corrected file.
-    # debugged_code roughly = input length × 1.2 (with annotations); buffer for errors/fixes/explanation.
-    debug_tokens = min(8000, max(2400, 800 + line_count * 18))
-    raw = call_openai(system_prompt, user_prompt, max_tokens=debug_tokens, temperature=0.2)
+    language = str(stage1.get("language") or lang_hint or "Unknown")
+    errors = stage1.get("errors_found") or []
+    fixes  = stage1.get("fixes_applied") or []
+    if not isinstance(errors, list): errors = [str(errors)]
+    if not isinstance(fixes, list): fixes = [str(fixes)]
+    errors = [str(e).strip() for e in errors if str(e).strip()]
+    fixes  = [str(f).strip() for f in fixes  if str(f).strip()]
+    while len(fixes) < len(errors):
+        fixes.append("Apply the matching correction described above.")
+    fixes = fixes[:len(errors) or len(fixes)]
+    explanation = str(stage1.get("explanation") or "").strip()
 
-    try:
-        cleaned = _strip_json_fences(raw)
-        data = json.loads(cleaned)
-        # Validate + coerce shape
-        errors = data.get("errors_found") or []
-        fixes  = data.get("fixes_applied") or []
-        if not isinstance(errors, list): errors = [str(errors)]
-        if not isinstance(fixes, list): fixes = [str(fixes)]
-        # Pad fixes if model returned mismatched lengths
-        while len(fixes) < len(errors):
-            fixes.append("Fix applied automatically.")
-        return {
-            "original_code": req.code,
-            "language": str(data.get("language") or req.language or "Unknown"),
-            "errors_found": [str(e) for e in errors],
-            "fixes_applied": [str(f) for f in fixes][:len(errors) or len(fixes)],
-            "explanation": str(data.get("explanation") or "").strip(),
-            "debugged_code": str(data.get("debugged_code") or req.code),
-        }
-    except (json.JSONDecodeError, ValueError, AttributeError):
-        # Surface a useful error explanation rather than silently returning the prompt as content.
-        return {
-            "original_code": req.code,
-            "debugged_code": req.code,
-            "language": req.language or "Unknown",
-            "errors_found": [],
-            "fixes_applied": [],
-            "explanation": (
-                "AI returned a malformed response. This sometimes happens with very long or unusual code. "
-                "Try debugging a smaller snippet, or rerun the request."
-            ),
-        }
+    # ── STAGE 2: produce the corrected file (only runs if bugs were found) ──
+    debugged_code = req.code
+    if errors:
+        bug_summary = "\n".join(f"- {e}" for e in errors[:40])
+        fixer_system = (
+            "You are a precise code rewriter. The user will give you BUGGY code and a list of bugs. "
+            "Your only job: return the FULL corrected file. Apply EVERY listed fix. Keep all variable names and structure "
+            "where possible. Preserve comments. Output proper indentation. Output ONLY a JSON object."
+        )
+        fixer_user = (
+            f"Language: {language}\n\n"
+            f"BUGS TO FIX:\n{bug_summary}\n\n"
+            f"BUGGY CODE:\n```\n{req.code}\n```\n\n"
+            'Return JSON: { "debugged_code": "<full corrected file as a single string, with \\n for newlines>" }'
+        )
+        # Generous tokens — corrected file may grow slightly with safe-guards.
+        fix_tokens = min(8000, max(2000, 600 + line_count * 22))
+        stage2 = _call_openai_json(fixer_system, fixer_user, max_tokens=fix_tokens, temperature=0.0)
+        candidate = str(stage2.get("debugged_code") or "").strip()
+        if candidate:
+            debugged_code = candidate
+
+    if not errors:
+        explanation = explanation or "Your code looks clean — no bugs were found."
+
+    return {
+        "original_code": req.code,
+        "language": language,
+        "errors_found": errors,
+        "fixes_applied": fixes,
+        "explanation": explanation,
+        "debugged_code": debugged_code,
+    }
 
 
 # ─── RUN CODE (executes Python/JS/TS locally; AI-simulates others) ─────────────
