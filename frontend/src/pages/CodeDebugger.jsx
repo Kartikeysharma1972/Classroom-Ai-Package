@@ -101,7 +101,10 @@ function CSTutorFab() {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [voiceErr, setVoiceErr] = useState('')
   const bottomRef = useRef(null)
+  const recognitionRef = useRef(null)
 
   useEffect(() => { if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, open])
 
@@ -125,6 +128,53 @@ function CSTutorFab() {
       setMessages(p => [...p, { role: 'assistant', content: "❌ I couldn't reach the tutor service. Please try again." }])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleVoice = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) {
+      setVoiceErr('Voice input is not supported in this browser. Use Chrome / Edge.')
+      setTimeout(() => setVoiceErr(''), 3500)
+      return
+    }
+    if (listening) {
+      try { recognitionRef.current?.stop() } catch {}
+      setListening(false)
+      return
+    }
+    const rec = new SR()
+    recognitionRef.current = rec
+    rec.continuous = false
+    rec.interimResults = true
+    rec.lang = 'en-US'
+    rec.onstart = () => { setListening(true); setVoiceErr('') }
+    rec.onresult = (e) => {
+      let transcript = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        transcript += e.results[i][0].transcript
+      }
+      setInput(transcript)
+      if (e.results[e.results.length - 1].isFinal) {
+        setListening(false)
+        if (transcript.trim()) send(transcript)
+      }
+    }
+    rec.onerror = (ev) => {
+      setListening(false)
+      const msg = ev.error === 'not-allowed'
+        ? 'Microphone permission denied.'
+        : ev.error === 'no-speech'
+          ? 'Did not catch that — please try again.'
+          : `Voice error: ${ev.error}`
+      setVoiceErr(msg)
+      setTimeout(() => setVoiceErr(''), 3500)
+    }
+    rec.onend = () => setListening(false)
+    try { rec.start() } catch (e) {
+      setListening(false)
+      setVoiceErr('Could not start microphone. Try again.')
+      setTimeout(() => setVoiceErr(''), 3000)
     }
   }
 
@@ -214,14 +264,46 @@ function CSTutorFab() {
             <div ref={bottomRef} />
           </div>
 
+          {voiceErr && (
+            <div style={{
+              padding: '8px 14px', background: '#fef2f2', color: '#dc2626',
+              fontSize: 12, fontWeight: 600, borderTop: '1.5px solid #fecaca',
+            }}>⚠️ {voiceErr}</div>
+          )}
+          {listening && (
+            <div style={{
+              padding: '8px 14px', background: '#fef3c7', color: '#92400e',
+              fontSize: 12, fontWeight: 700, borderTop: '1.5px solid #fde68a',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', background: '#dc2626',
+                animation: 'pulse 1s ease-in-out infinite',
+              }} />
+              🎙️ Listening — speak now...
+            </div>
+          )}
           <div style={{
             display: 'flex', gap: 8, padding: 12, borderTop: '1.5px solid #f1f5f9', background: '#fff',
           }}>
+            <button
+              type="button"
+              onClick={handleVoice}
+              disabled={loading}
+              title={listening ? 'Stop listening' : 'Speak your question'}
+              style={{
+                width: 42, padding: 0, borderRadius: 10,
+                border: listening ? 'none' : '1.5px solid #e2e8f0',
+                background: listening ? 'linear-gradient(135deg, #ef4444, #dc2626)' : '#fff',
+                color: listening ? '#fff' : '#4f46e5',
+                fontSize: 16, fontWeight: 800, cursor: loading ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{listening ? '⏹' : '🎙️'}</button>
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !loading && send()}
-              placeholder="Ask anything about CS..."
+              placeholder={listening ? 'Listening...' : 'Ask anything about CS...'}
               disabled={loading}
               style={{
                 flex: 1, padding: '10px 12px', border: '1.5px solid #e2e8f0',
@@ -261,20 +343,58 @@ export default function CodeDebugger() {
   const [runLoading, setRunLoading] = useState(false)
   const [simpleExp, setSimpleExp] = useState('')
   const [simpleLoading, setSimpleLoading] = useState(false)
+  const [fixApplied, setFixApplied] = useState(false)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     if (result) localStorage.setItem(STORAGE_KEY, JSON.stringify(result))
   }, [result])
 
+  const EXT_TO_LANG = {
+    py: 'Python', js: 'JavaScript', ts: 'TypeScript', jsx: 'JavaScript (React)',
+    tsx: 'TypeScript (React)', java: 'Java', cpp: 'C++', cc: 'C++', cxx: 'C++',
+    c: 'C', h: 'C', cs: 'C#', go: 'Go', rb: 'Ruby', php: 'PHP', swift: 'Swift',
+    kt: 'Kotlin', rs: 'Rust', html: 'HTML', htm: 'HTML', css: 'CSS', sql: 'SQL',
+    sh: 'Shell/Bash', bash: 'Shell/Bash',
+  }
+
+  const handleUploadFile = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelected = (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > 200 * 1024) {
+      setError(`File too large (${(file.size / 1024).toFixed(0)} KB). Max 200 KB.`)
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = String(reader.result || '')
+      setCode(text)
+      setError('')
+      setResult(null)
+      setRunOutput(null)
+      setSimpleExp('')
+      setFixApplied(false)
+      const ext = (file.name.split('.').pop() || '').toLowerCase()
+      const detected = EXT_TO_LANG[ext]
+      if (detected) setLanguage(detected)
+    }
+    reader.onerror = () => setError('Could not read the file. Try a plain text/code file.')
+    reader.readAsText(file)
+  }
+
   const handleRun = async () => {
-    const src = result ? result.debugged_code : code
-    if (!src?.trim()) { setError('Please paste some code first.'); return }
+    if (!code?.trim()) { setError('Please paste some code first.'); return }
     setError(''); setRunLoading(true); setRunOutput(null)
     try {
       const res = await fetch(`${API}/api/run-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: src, language: result?.language || language }),
+        body: JSON.stringify({ code, language: result?.language || language }),
       })
       const data = await res.json()
       setRunOutput(data)
@@ -287,7 +407,7 @@ export default function CodeDebugger() {
 
   const handleDebug = async () => {
     if (!code.trim()) { setError('Please paste some code first.'); return }
-    setError(''); setResult(null); setSimpleExp(''); setLoading(true)
+    setError(''); setResult(null); setSimpleExp(''); setFixApplied(false); setLoading(true); setViewMode('learn')
     try {
       const res = await fetch(`${API}/api/debug-code`, {
         method: 'POST',
@@ -415,20 +535,21 @@ ${runSection}
   }
 
   const handleClear = () => {
-    setCode(''); setResult(null); setError(''); setRunOutput(null); setSimpleExp('')
+    setCode(''); setResult(null); setError(''); setRunOutput(null); setSimpleExp(''); setFixApplied(false)
     localStorage.removeItem(STORAGE_KEY)
   }
 
   const handleSample = () => {
     setCode(SAMPLE_CODE); setLanguage('Python')
-    setResult(null); setError(''); setRunOutput(null); setSimpleExp('')
+    setResult(null); setError(''); setRunOutput(null); setSimpleExp(''); setFixApplied(false)
   }
 
   const handleApplyFix = () => {
     if (!result?.debugged_code) return
     setCode(result.debugged_code)
-    setResult(null); setRunOutput(null); setSimpleExp('')
-    localStorage.removeItem(STORAGE_KEY)
+    setFixApplied(true)
+    setViewMode('fixed')
+    setRunOutput(null)
   }
 
   const errorCount = result?.errors_found?.length || 0
@@ -500,10 +621,18 @@ ${runSection}
             </select>
           </div>
 
-          <div style={{ padding: '12px 16px', display: 'flex', gap: 8, borderBottom: '1.5px solid #f1f5f9' }}>
+          <div style={{ padding: '12px 16px', display: 'flex', gap: 8, borderBottom: '1.5px solid #f1f5f9', flexWrap: 'wrap' }}>
             <button type="button" onClick={handlePaste} style={btnPrimary}>📋 Paste</button>
+            <button type="button" onClick={handleUploadFile} style={btnPrimary}>📂 Upload File</button>
             <button type="button" onClick={handleSample} style={btnGhost}>✨ Sample</button>
             {code && <button type="button" onClick={handleClear} style={btnGhost}>🗑 Clear</button>}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".py,.js,.ts,.jsx,.tsx,.java,.cpp,.cc,.cxx,.c,.h,.cs,.go,.rb,.php,.swift,.kt,.rs,.html,.htm,.css,.sql,.sh,.bash,.txt"
+              onChange={handleFileSelected}
+              style={{ display: 'none' }}
+            />
           </div>
 
           <textarea
@@ -590,12 +719,19 @@ ${runSection}
                 maxHeight: 180, overflow: 'auto',
                 whiteSpace: 'pre-wrap', wordBreak: 'break-all',
               }}>{runOutput.output || runOutput.error || '(no output)'}</pre>
-              {runOutput.exit_code === 0 && !runOutput.error && (
+              {runOutput.exit_code === 0 && !runOutput.error ? (
                 <div style={{
                   background: '#ecfdf5', padding: '8px 14px', fontSize: 12, color: '#059669',
                   fontWeight: 600, borderTop: '1.5px solid #a7f3d0',
                 }}>
                   ✨ Code ran successfully — no fix needed! Use “Fix My Code” only if behaviour is wrong.
+                </div>
+              ) : (
+                <div style={{
+                  background: '#fef2f2', padding: '8px 14px', fontSize: 12, color: '#dc2626',
+                  fontWeight: 600, borderTop: '1.5px solid #fecaca',
+                }}>
+                  ⚠️ Your code has errors and cannot run — click <b>🔮 Fix My Code</b> to see the bugs and the corrected version.
                 </div>
               )}
             </div>
@@ -720,16 +856,17 @@ ${runSection}
                   </div>
                 )}
 
-                {result.explanation && (
+                {fixApplied && hasErrors && (
                   <div style={{
-                    background: 'linear-gradient(135deg, #f5f3ff, #eef2ff)',
-                    border: '1.5px solid #c7d2fe', borderRadius: 14,
-                    padding: '14px 18px', marginBottom: 18,
+                    background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)',
+                    border: '1.5px solid #6ee7b7', borderRadius: 12,
+                    padding: '10px 14px', marginBottom: 14,
+                    display: 'flex', alignItems: 'center', gap: 8,
                   }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 6 }}>
-                      🖥️ CodeFix Says
-                    </div>
-                    <p style={{ fontSize: 13.5, lineHeight: 1.7, color: '#3730a3', margin: 0 }}>{result.explanation}</p>
+                    <span style={{ fontSize: 18 }}>✅</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>
+                      Fix applied — your editor now contains the corrected code. Click <b>▶ Run Code</b> to verify.
+                    </span>
                   </div>
                 )}
 
@@ -748,20 +885,79 @@ ${runSection}
                 )}
 
                 {(viewMode === 'fixed' || !hasErrors) && (
-                  <div style={{
-                    background: '#0f172a', borderRadius: 14, padding: 18, marginTop: 12,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>✅ FIXED CODE</span>
-                      <div style={{ marginLeft: 'auto' }}>
-                        <CopyButton text={result.debugged_code} />
+                  <div>
+                    {hasErrors && (
+                      <div style={{
+                        background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 14,
+                        padding: 16, marginBottom: 14,
+                      }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#1a1a2e', marginBottom: 10 }}>
+                          🛠️ Summary of {errorCount} Fix{errorCount !== 1 ? 'es' : ''}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <div>
+                            <div style={{
+                              fontSize: 10, fontWeight: 800, color: '#dc2626',
+                              background: '#fef2f2', padding: '3px 8px', borderRadius: 100,
+                              display: 'inline-block', marginBottom: 8, letterSpacing: '0.6px',
+                            }}>🐛 BUGS FOUND</div>
+                            {result.errors_found.map((e, i) => (
+                              <div key={i} style={{
+                                display: 'flex', gap: 8, padding: '6px 0',
+                                fontSize: 12.5, color: '#475569', lineHeight: 1.5,
+                                borderBottom: i < result.errors_found.length - 1 ? '1px dashed #f1f5f9' : 'none',
+                              }}>
+                                <span style={{
+                                  flexShrink: 0, width: 18, height: 18, borderRadius: '50%',
+                                  background: '#fef2f2', color: '#dc2626', fontSize: 10, fontWeight: 800,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>{i + 1}</span>
+                                <span>{e}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div>
+                            <div style={{
+                              fontSize: 10, fontWeight: 800, color: '#059669',
+                              background: '#ecfdf5', padding: '3px 8px', borderRadius: 100,
+                              display: 'inline-block', marginBottom: 8, letterSpacing: '0.6px',
+                            }}>🛠️ FIXES APPLIED</div>
+                            {result.fixes_applied.map((f, i) => (
+                              <div key={i} style={{
+                                display: 'flex', gap: 8, padding: '6px 0',
+                                fontSize: 12.5, color: '#475569', lineHeight: 1.5,
+                                borderBottom: i < result.fixes_applied.length - 1 ? '1px dashed #f1f5f9' : 'none',
+                              }}>
+                                <span style={{
+                                  flexShrink: 0, width: 18, height: 18, borderRadius: '50%',
+                                  background: '#ecfdf5', color: '#059669', fontSize: 10, fontWeight: 800,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>{i + 1}</span>
+                                <span>{f}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
+                    )}
+
+                    <div style={{
+                      background: '#0f172a', borderRadius: 14, padding: 18, marginTop: 12,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>
+                          ✅ FIXED CODE {fixApplied ? '· In Editor' : ''}
+                        </span>
+                        <div style={{ marginLeft: 'auto' }}>
+                          <CopyButton text={result.debugged_code} />
+                        </div>
+                      </div>
+                      <pre style={{
+                        margin: 0, padding: 0, color: '#e2e8f0',
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5,
+                        lineHeight: 1.7, overflowX: 'auto', whiteSpace: 'pre-wrap',
+                      }}>{result.debugged_code}</pre>
                     </div>
-                    <pre style={{
-                      margin: 0, padding: 0, color: '#e2e8f0',
-                      fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5,
-                      lineHeight: 1.7, overflowX: 'auto', whiteSpace: 'pre-wrap',
-                    }}>{result.debugged_code}</pre>
                   </div>
                 )}
               </>

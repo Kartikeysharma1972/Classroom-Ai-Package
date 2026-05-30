@@ -2357,16 +2357,32 @@ def run_code(req: RunCodeRequest):
         except Exception as e:
             return {"output": "", "error": str(e), "exit_code": -1, "language": lang, "simulated": False}
 
-    # Fallback: AI-simulated execution for compiled / unsupported languages
+    # Fallback: AI-simulated execution for compiled / unsupported languages.
+    # The model MUST be honest — if the code has compile/runtime bugs, return the
+    # error in `error` and exit_code 1. Do NOT fabricate successful output.
     try:
         sys_prompt = (
-            f"You are a {lang} interpreter. Execute the user's code mentally and output ONLY what the "
-            f"program would print to stdout, line-for-line. If there is a runtime/compile error, show the "
-            f"exact error message instead. No explanations, no markdown, no fences — only the raw output."
+            f"You are an honest {lang} compiler + runtime. Mentally execute the user's code and report what would actually happen. "
+            "RULES:\n"
+            "- If the code has ANY compile error, syntax error, type error, or runtime error, report it exactly as the real compiler/runtime would.\n"
+            "- NEVER fabricate a successful output if the code is broken. Be ruthlessly honest.\n"
+            "- Return STRICT JSON only with these keys: "
+            '{"status":"ok"|"error", "output":"<stdout text or empty>", "error":"<error message or empty>"}.\n'
+            "- If the program would crash before printing anything, output is empty and status='error'.\n"
+            "- If it runs cleanly, status='ok' and error is empty."
         )
-        out = call_openai(sys_prompt, f"Run this {lang} code and produce its output:\n\n{code}",
-                          max_tokens=600, temperature=0)
-        return {"output": f"[Simulated output — {lang}]\n{out}".strip(),
+        result = _call_openai_json(
+            sys_prompt,
+            f"Run this {lang} code honestly. Report any compile/runtime errors as the real compiler would:\n\n```\n{code}\n```",
+            max_tokens=700, temperature=0,
+        )
+        status = str(result.get("status", "ok")).lower()
+        out = str(result.get("output") or "").strip()
+        err = str(result.get("error") or "").strip()
+        if status == "error" or err:
+            return {"output": out, "error": err or "Code failed to run.", "exit_code": 1,
+                    "language": lang, "simulated": True}
+        return {"output": f"[Simulated output — {lang}]\n{out}".strip() if out else "(no output)",
                 "error": "", "exit_code": 0, "language": lang, "simulated": True}
     except Exception as e:
         return {"output": "", "error": f"Could not run {lang}: {e}", "exit_code": -1, "language": lang, "simulated": False}
