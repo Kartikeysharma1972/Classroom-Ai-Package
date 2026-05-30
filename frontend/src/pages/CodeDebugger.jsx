@@ -741,7 +741,7 @@ ${runSection}
           overflow: 'hidden', maxHeight: 'calc(100vh - 220px)',
         }}>
           <div style={{ padding: '14px 20px', borderBottom: '1.5px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: '#1a1a2e' }}>🧠 AI Analysis</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#1a1a2e' }}></div>
             {result && (
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, background: '#f1f5f9', padding: 3, borderRadius: 10 }}>
                 <button type="button" onClick={() => setViewMode('learn')} style={tabBtn(viewMode === 'learn')}>📚 Learn</button>
