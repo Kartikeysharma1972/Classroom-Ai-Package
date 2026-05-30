@@ -33,7 +33,7 @@ export default function LoginPage() {
       } else {
         await login(form.email, form.password)
       }
-      navigate('/')
+      navigate('/dashboard')
     } catch (err) {
       setError(err.message)
     } finally {

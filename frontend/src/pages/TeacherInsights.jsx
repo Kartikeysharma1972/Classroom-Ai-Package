@@ -37,7 +37,7 @@ export default function TeacherInsights() {
             marginBottom: 8
           }}>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/dashboard')}
               style={{
                 background: 'white',
                 border: 'none',

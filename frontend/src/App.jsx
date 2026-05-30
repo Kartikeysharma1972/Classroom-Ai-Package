@@ -55,11 +55,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route path="/landing" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
 
         <Route element={<ProtectedLayout />}>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/worksheet" element={<WorksheetGenerator />} />
           <Route path="/lesson-plan" element={<LessonPlanGenerator />} />
 
@@ -70,7 +71,7 @@ export default function App() {
           <Route path="/feedback" element={<FeedbackSummarizer />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/landing" />} />
+        <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>
   )
