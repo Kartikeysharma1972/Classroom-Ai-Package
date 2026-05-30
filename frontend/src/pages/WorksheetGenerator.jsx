@@ -74,12 +74,19 @@ const FORM_BODY = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 24px 2
 
 const ErrMsg = ({ msg }) => msg ? <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: 4, fontWeight: 500 }}>⚠ {msg}</div> : null
 
-// ── Track tabs (Core / Miscellaneous) ─────────────────
-function TrackTabs({ value, onChange, coreCount, miscCount, disabled }) {
+// Grade buckets where CBSE/NCERT core track does not apply.
+const HIDE_CORE_GRADES = ['Kindergarten', 'College']
+const isHideCoreGrade = (g) => HIDE_CORE_GRADES.includes(g)
+
+// ── Track tabs (Core / Suggestions / Type) — grade-aware ─────────────────
+function TrackTabs({ value, onChange, coreCount, miscCount, disabled, grade, hideCoreWhenEmpty = false, showType = true }) {
+  const hideCore = isHideCoreGrade(grade) || (hideCoreWhenEmpty && coreCount === 0)
+  const miscLabel = isHideCoreGrade(grade) ? 'Suggestions' : 'Miscellaneous'
   const tabs = [
-    { key: 'core', label: 'Core (CBSE/NCERT)', count: coreCount, color: '#10b981', bg: '#ecfdf5', border: '#bbf7d0' },
-    { key: 'misc', label: 'Miscellaneous',     count: miscCount, color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
-  ]
+    !hideCore && { key: 'core', label: 'Core (CBSE/NCERT)', count: coreCount, color: '#10b981', bg: '#ecfdf5', border: '#bbf7d0' },
+    { key: 'misc', label: miscLabel, count: miscCount, color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
+    showType && { key: 'type', label: '✏️ Type', count: null, color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
+  ].filter(Boolean)
   return (
     <div style={{ display: 'flex', gap: 6, marginBottom: 6, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
       {tabs.map(t => {
@@ -94,10 +101,12 @@ function TrackTabs({ value, onChange, coreCount, miscCount, disabled }) {
             transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           }}>
             {t.label}
-            <span style={{
-              fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: 8,
-              background: active ? t.color : '#e5e7eb', color: active ? '#fff' : 'var(--text-2)',
-            }}>{t.count}</span>
+            {t.count !== null && (
+              <span style={{
+                fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                background: active ? t.color : '#e5e7eb', color: active ? '#fff' : 'var(--text-2)',
+              }}>{t.count}</span>
+            )}
           </button>
         )
       })}
@@ -159,18 +168,24 @@ export default function WorksheetGenerator() {
   // Reset dependent fields when parents change
   const onGradeChange = (val) => {
     setForm(f => ({ ...f, grade_level: val, subject: '', topic: '' }))
-    setSubjectTrack('core'); setTopicTrack('core'); setCustomTopic('')
+    const defaultTrack = isHideCoreGrade(val) ? 'misc' : 'core'
+    setSubjectTrack(defaultTrack); setTopicTrack(defaultTrack); setCustomTopic('')
     setErrors({})
   }
   const onSubjectTrackChange = (t) => {
     setSubjectTrack(t)
     setForm(f => ({ ...f, subject: '', topic: '' }))
-    setTopicTrack('core'); setCustomTopic('')
+    // When user picks Type for subject, default topic to Type too — they're going freeform.
+    if (t === 'type') setTopicTrack('type')
+    else if (t === 'misc') setTopicTrack('misc')
+    else setTopicTrack(isHideCoreGrade(form.grade_level) ? 'misc' : 'core')
+    setCustomTopic('')
   }
   const onSubjectChange = (val) => {
     setForm(f => ({ ...f, subject: val, topic: '' }))
-    if (subjectTrack === 'misc') setTopicTrack('misc')
-    else setTopicTrack('core')
+    if (subjectTrack === 'type') setTopicTrack('type')
+    else if (subjectTrack === 'misc') setTopicTrack('misc')
+    else setTopicTrack(isHideCoreGrade(form.grade_level) ? 'misc' : 'core')
     setCustomTopic('')
   }
   const onTopicTrackChange = (t) => {
@@ -274,13 +289,10 @@ export default function WorksheetGenerator() {
               </button>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 40, height: 40, background: ACCENT_SOFT, border: `1.5px solid ${ACCENT_MID}`, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="1.9" strokeLinecap="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                </svg>
+              <div style={{ width: 40, height: 40, background: '#fff', border: `1.5px solid ${ACCENT_MID}`, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                <img src="/codevidhya_logo.jfif" alt="CodeVidhya"
+                  style={{ width: '82%', height: '82%', objectFit: 'contain' }}
+                  onError={(e) => { e.currentTarget.style.display='none' }} />
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -306,7 +318,7 @@ export default function WorksheetGenerator() {
               <ErrMsg msg={errors.grade_level} />
             </div>
 
-            {/* STEP 2 — Subject (Core/Misc tabs) */}
+            {/* STEP 2 — Subject (Core / Suggestions / Type tabs) */}
             <div className="form-group">
               <label className="form-label">
                 Subject <span style={{ color: '#ef4444' }}>*</span>
@@ -318,14 +330,27 @@ export default function WorksheetGenerator() {
                 coreCount={coreSubjects.length}
                 miscCount={miscSubjects.length}
                 disabled={subjectLocked}
+                grade={form.grade_level}
               />
-              <CustomSelect value={form.subject} onChange={e => onSubjectChange(e.target.value)}
-                style={{ borderColor: errors.subject ? '#fca5a5' : ACCENT_MID, opacity: subjectLocked ? 0.5 : 1 }}>
-                <option value="">{subjectLocked ? 'Pick grade first…' : (subjectTrack === 'core' ? '— Pick CBSE subject —' : '— Pick miscellaneous subject —')}</option>
-                {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
-              </CustomSelect>
-              {!subjectLocked && subjectTrack === 'core' && coreSubjects.length === 0 && (
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>No CBSE TOC entries for this grade — try the Miscellaneous tab.</div>
+              {subjectTrack === 'type' ? (
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Artificial Intelligence, Robotics, Mathematics…"
+                  value={form.subject}
+                  onChange={e => onSubjectChange(e.target.value)}
+                  disabled={subjectLocked}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10,
+                    border: `1.5px solid ${errors.subject ? '#fca5a5' : ACCENT_MID}`,
+                    fontFamily: 'inherit', fontSize: '0.9rem', background: 'var(--bg)',
+                    outline: 'none', boxSizing: 'border-box', opacity: subjectLocked ? 0.5 : 1 }}
+                />
+              ) : (
+                <CustomSelect value={form.subject} onChange={e => onSubjectChange(e.target.value)}
+                  style={{ borderColor: errors.subject ? '#fca5a5' : ACCENT_MID, opacity: subjectLocked ? 0.5 : 1 }}>
+                  <option value="">{subjectLocked ? 'Pick grade first…' : (subjectTrack === 'core' ? '— Pick CBSE subject —' : (isHideCoreGrade(form.grade_level) ? '— Pick a suggestion —' : '— Pick miscellaneous subject —'))}</option>
+                  {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                </CustomSelect>
               )}
               <ErrMsg msg={errors.subject} />
             </div>
@@ -345,18 +370,22 @@ export default function WorksheetGenerator() {
                 coreCount={coreTopics.length}
                 miscCount={miscTopics.length}
                 disabled={topicLocked}
+                grade={form.grade_level}
+                hideCoreWhenEmpty
               />
-              <CustomSelect value={topicOptions.some(t => t.label === form.topic) ? form.topic : ''}
-                onChange={e => { set('topic', e.target.value); setCustomTopic('') }}
-                style={{ borderColor: errors.topic ? '#fca5a5' : ACCENT_MID, opacity: topicLocked ? 0.5 : 1 }}>
-                <option value="">
-                  {topicLocked ? 'Pick subject first…' :
-                    (topicTrack === 'core'
-                      ? (coreTopics.length === 0 ? 'No CBSE chapters for this subject' : '— Pick NCERT chapter / topic —')
-                      : '— Pick miscellaneous topic —')}
-                </option>
-                {topicOptions.map(t => <option key={t.label} value={t.label}>{t.chapter ? `${t.chapter} — ${t.label}` : t.label}</option>)}
-              </CustomSelect>
+              {topicTrack !== 'type' && (
+                <CustomSelect value={topicOptions.some(t => t.label === form.topic) ? form.topic : ''}
+                  onChange={e => { set('topic', e.target.value); setCustomTopic('') }}
+                  style={{ borderColor: errors.topic ? '#fca5a5' : ACCENT_MID, opacity: topicLocked ? 0.5 : 1 }}>
+                  <option value="">
+                    {topicLocked ? 'Pick subject first…' :
+                      (topicTrack === 'core'
+                        ? '— Pick NCERT chapter / topic —'
+                        : (isHideCoreGrade(form.grade_level) ? '— Pick a suggested topic —' : '— Pick miscellaneous topic —'))}
+                  </option>
+                  {topicOptions.map(t => <option key={t.label} value={t.label}>{t.chapter ? `${t.chapter} — ${t.label}` : t.label}</option>)}
+                </CustomSelect>
+              )}
 
               {/* Topic description preview */}
               {!topicLocked && (() => {

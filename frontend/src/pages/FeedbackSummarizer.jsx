@@ -187,13 +187,13 @@ export default function FeedbackSummarizer() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative' }}>
           <div style={{
             width: 52, height: 52, borderRadius: 14,
-            background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(10px)',
+            background: '#fff', backdropFilter: 'blur(10px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid rgba(255,255,255,0.25)',
+            border: '1px solid rgba(255,255,255,0.25)', overflow: 'hidden',
           }}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
+            <img src="/codevidhya_logo.jfif" alt="CodeVidhya"
+              style={{ width: '82%', height: '82%', objectFit: 'contain' }}
+              onError={(e) => { e.currentTarget.style.display='none' }} />
           </div>
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>Feedback Writer</h1>

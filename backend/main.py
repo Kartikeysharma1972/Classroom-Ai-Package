@@ -532,140 +532,117 @@ def generate_lesson_plan(req: LessonPlanRequest):
             f"You MUST follow this request and integrate it into the lesson plan.\n"
         )
 
+    # Parse class duration into total minutes for accurate time-boxing across the 9 sections.
+    duration_total = 45
+    try:
+        if "hour" in req.duration.lower():
+            duration_total = int(req.duration.split()[0]) * 60
+        elif "block" in req.duration.lower():
+            duration_total = 90
+        else:
+            duration_total = int(req.duration.split()[0])
+    except Exception:
+        duration_total = 45
+
+    # Suggested time split across the 9 sections (sums to duration_total).
+    weights = [0.05, 0.05, 0.10, 0.20, 0.15, 0.15, 0.10, 0.10, 0.10]
+    times = [max(2, round(duration_total * w)) for w in weights]
+    # Make times sum exactly to duration_total
+    drift = duration_total - sum(times)
+    times[3] += drift  # absorb drift into Direct Instruction
+    section_names = [
+        "Objective & Competency Anchor",
+        "Prior Knowledge Activation",
+        "Hook & Real-World Connect",
+        "Direct Instruction",
+        "Guided Practice",
+        "Independent Practice",
+        "HOTS Task",
+        "Formative Assessment",
+        "Closure & Home Connect",
+    ]
+    time_table = "\n".join(f"  {i+1}. {section_names[i]} — {times[i]} min" for i in range(9))
+
+    standards_block = ""
+    if req.standards and req.standards.strip():
+        standards_block = f"\nStandards / Curriculum: {req.standards.strip()}\n"
+
     system_prompt = (
-        "You are an expert teacher writing a lesson plan that another teacher can walk into "
-        "class and teach from directly. You always include ACTUAL solved examples with numbers "
-        "and step-by-step working. You never write generic descriptions — you write the real "
-        "content.\n\n"
+        "You are an expert teacher and instructional designer creating a classroom-ready 9-section "
+        "lesson plan that another teacher can walk in and teach from. You always include ACTUAL solved "
+        "examples with real numbers and step-by-step working. You never write generic descriptions.\n\n"
         "OUTPUT FORMAT (STRICT):\n"
-        "- Respond in CLEAN MARKDOWN ONLY. Never emit JSON, HTML tags, code fences around the whole output, or placeholder brackets like [TO BE FILLED].\n"
-        "- Use # for the main title, ## for major section headers, ### for sub-sections.\n"
-        "- Use **bold** for key terms, numbered lists for steps, - for bullet points, --- for dividers.\n"
-        "- For math: write equations inline as plain text (e.g. x^2 + 2x + 1). NO LaTeX delimiters like $$ or \\(...\\).\n"
-        "- Every placeholder you see in the prompt (anything in [square brackets]) MUST be replaced with concrete content. Never leave brackets in the output.\n\n"
+        "- Respond in CLEAN MARKDOWN ONLY. No JSON, no HTML, no whole-output code fences, no [TO BE FILLED] placeholders.\n"
+        "- Start with a single # title line, then 9 ## sections in the EXACT order specified.\n"
+        "- Every section header MUST include its time allocation in parentheses, e.g. '## 1. Objective & Competency Anchor (3 min)'.\n"
+        "- Sum of the 9 section times MUST equal the total class duration. Never overflow.\n"
+        "- If a section is genuinely not applicable (e.g. no prior knowledge to activate for an intro topic, or no HOTS at "
+        "lower grades), output the section header with the note '_Flagged: this section may be skipped — <reason>._' "
+        "but DO still include the section header so the teacher sees the structure.\n"
+        "- Use **bold** for key terms, numbered lists for steps, - for bullet points, --- between sections.\n"
+        "- For math: plain text (e.g. x^2 + 2x + 1). NO LaTeX $$ or \\(...\\).\n"
+        "- Replace every [square-bracket placeholder] with concrete content.\n\n"
         f"{lang_profile}"
     )
 
     user_prompt = (
-        f"Write a detailed, classroom-ready lesson plan.\n\n"
+        f"Write a 9-section, time-boxed lesson plan.\n\n"
         f"Topic: {req.topic}\n"
         f"Subject: {req.subject}\n"
         f"Grade: {req.grade_level}\n"
-        f"Duration: {req.duration}\n"
+        f"Total Class Duration: {req.duration} ({duration_total} minutes)\n"
+        f"{standards_block}"
         f"{chapter_context}"
         f"{additional_notes_section}"
-        f"{lesson_material_note}\n"
-        "Follow this EXACT structure. Fill in every section with REAL content.\n\n"
+        f"{lesson_material_note}\n\n"
+
+        "TIME ALLOCATION (use these exact times in section headers; sums to total duration):\n"
+        f"{time_table}\n\n"
+
+        "FOLLOW THIS EXACT 9-SECTION STRUCTURE. Each section header MUST be a ## heading with the time in parentheses.\n\n"
 
         "---\n\n"
 
-        "LESSON OVERVIEW\n"
-        f"Topic: {req.topic}\n"
-        f"Grade: {req.grade_level} | Subject: {req.subject} | Duration: {req.duration}\n"
-        "Essential Question: [Write one thought-provoking question]\n"
-        "By the end of this lesson, students will be able to:\n"
-        "  1. [First specific skill]\n"
-        "  2. [Second specific skill]\n"
-        "  3. [Third specific skill]\n\n"
+        f"## 1. Objective & Competency Anchor ({times[0]} min)\n"
+        "- 2-3 SMART learning objectives (Students will be able to ...).\n"
+        "- 1-2 NCERT/NCF competencies or LO codes this lesson maps to.\n\n"
 
-        "MATERIALS NEEDED\n"
-        "- [List every item with quantity, e.g., 30 calculators, 15 protractors]\n"
-        "- Textbook: [chapter and page reference if applicable]\n"
-        "- Board setup: [what to draw/write before class starts]\n\n"
+        f"## 2. Prior Knowledge Activation ({times[1]} min)\n"
+        "- Quick recall task or 2-3 diagnostic questions (with expected answers) probing prerequisites.\n"
+        "- If the topic has no real prerequisites, flag the section per the rule above.\n\n"
 
-        "WARM-UP / HOOK (5 minutes)\n"
-        "Activity: [Describe a specific, engaging opening — a puzzle, challenge, real-world "
-        "scenario, or surprising demo. NOT 'discuss the topic'. Write exactly what the teacher "
-        "does and says.]\n"
-        "Ask students: [Write 2-3 specific questions with expected answers]\n\n"
+        f"## 3. Hook & Real-World Connect ({times[2]} min)\n"
+        "- A specific, engaging opener (puzzle, story, demo, real-world scenario) — NOT 'discuss the topic'.\n"
+        "- 1 essential question and 2-3 student-facing questions with expected answers.\n\n"
 
-        "DIRECT INSTRUCTION (15-20 minutes)\n"
-        "Teach the following concepts in order. After EACH concept, include a worked example.\n\n"
-        "Concept 1: [Name and definition]\n"
-        "Write on board: [What to write]\n"
-        "Explain: [What to say to students, 2-3 sentences]\n\n"
-        "  Worked Example 1:\n"
-        "  Question: [Write the actual question with numbers]\n"
-        "  Solution:\n"
-        "    Step 1: [Show the actual calculation]\n"
-        "    Step 2: [Show the next step]\n"
-        "    Step 3: [If needed]\n"
-        "    Answer: [The final answer]\n"
-        "  Ask class: [A quick check question]\n\n"
-        "Concept 2: [Name and definition]\n"
-        "Write on board: [What to write]\n"
-        "Explain: [What to say]\n\n"
-        "  Worked Example 2:\n"
-        "  Question: [Actual question]\n"
-        "  Solution:\n"
-        "    Step 1: [Actual work]\n"
-        "    Step 2: [Actual work]\n"
-        "    Answer: [Answer]\n"
-        "  Ask class: [Check question]\n\n"
-        "Concept 3: [Name and definition]\n\n"
-        "  Worked Example 3:\n"
-        "  Question: [Actual question]\n"
-        "  Solution: [Full step-by-step]\n"
-        "  Answer: [Answer]\n\n"
-        "[Continue for all key concepts in the topic. Include at least 3-4 worked examples total.]\n\n"
+        f"## 4. Direct Instruction ({times[3]} min)\n"
+        "- Teach each key concept in order. After every concept include a WORKED EXAMPLE (Question → Step-by-Step Solution → Answer).\n"
+        "- Include 3-4 worked examples total. Show what to write on the board.\n\n"
 
-        "GUIDED PRACTICE ACTIVITY (10-15 minutes)\n"
-        "Activity Name: [Give it a fun, creative name like 'Trig Relay Race' or 'Equation "
-        "Scavenger Hunt']\n"
-        "How it works:\n"
-        "  Step 1: [Exact instruction]\n"
-        "  Step 2: [Exact instruction]\n"
-        "  Step 3: [Exact instruction]\n"
-        "Group size: [e.g., pairs or groups of 4]\n"
-        "Questions for the activity:\n"
-        "  Q1: [Actual question] -- Answer: [answer]\n"
-        "  Q2: [Actual question] -- Answer: [answer]\n"
-        "  Q3: [Actual question] -- Answer: [answer]\n"
-        "  Q4: [Actual question] -- Answer: [answer]\n"
-        "Teacher tip: [What mistakes to watch for]\n\n"
+        f"## 5. Guided Practice ({times[4]} min)\n"
+        "- Named, structured activity (e.g. 'Equation Relay Race'). Steps with sub-step timings.\n"
+        "- Group size, student roles, and 4 questions with answers.\n\n"
 
-        "INDEPENDENT PRACTICE (10 minutes)\n"
-        "Students solve these on their own:\n"
-        "  Easy:\n"
-        "    1. [Question] -- Answer: [answer]\n"
-        "    2. [Question] -- Answer: [answer]\n"
-        "  Medium:\n"
-        "    3. [Question] -- Answer: [answer]\n"
-        "    4. [Question] -- Answer: [answer]\n"
-        "  Challenging:\n"
-        "    5. [Question] -- Answer: [answer]\n"
-        "    6. [Question] -- Answer: [answer]\n\n"
+        f"## 6. Independent Practice ({times[5]} min)\n"
+        "- Mixed-difficulty problem set (2 easy, 2 medium, 2 challenging) with answers.\n\n"
 
-        "EXIT TICKET (5 minutes)\n"
-        "Students answer on a slip of paper before leaving:\n"
-        "  1. [Specific question] -- Expected answer: [answer]\n"
-        "  2. [Specific question] -- Expected answer: [answer]\n\n"
+        f"## 7. HOTS Task ({times[6]} min)\n"
+        "- A higher-order-thinking task: Analyse / Evaluate / Create. Must require justification, not just recall.\n"
+        "- Include a short rubric (3 criteria) for what 'good' looks like.\n"
+        "- If genuinely inappropriate for the grade/topic, flag the section per the rule above.\n\n"
 
-        "DIFFERENTIATION\n"
-        "For struggling learners:\n"
-        "  - [Specific scaffold or simpler version of a problem]\n"
-        "  - [Another support strategy]\n"
-        "For advanced students:\n"
-        "  - Challenge: [A harder problem that extends the concept]\n"
-        "  - Extension: [An open-ended exploration task]\n\n"
+        f"## 8. Formative Assessment ({times[7]} min)\n"
+        "- Exit-ticket-style: 3 specific questions with expected answers.\n"
+        "- Note which objective each question evaluates and what mastery looks like.\n\n"
 
-        "HOMEWORK (4-5 problems)\n"
-        "  1. [Easy] [Question] -- Answer: [answer]\n"
-        "  2. [Easy] [Question] -- Answer: [answer]\n"
-        "  3. [Medium] [Question] -- Answer: [answer]\n"
-        "  4. [Hard] [Question] -- Answer: [answer]\n"
-        "  5. [Hard] [Question] -- Answer: [answer]\n\n"
+        f"## 9. Closure & Home Connect ({times[8]} min)\n"
+        "- 2-sentence student-led recap question, and a single home-connect task that links the lesson to family/community/daily life.\n"
+        "- Plus 3-4 homework problems (easy → hard) with answers.\n\n"
 
-        "TEACHER NOTES\n"
-        "- Common mistakes: [2-3 specific mistakes students make on this topic]\n"
-        "- Time adjustment: [What to cut if running short, what to extend if time remains]\n"
-        "- Next lesson: [What comes next and how this connects]\n\n"
+        "After the 9 sections, add ONE small **Teacher Notes** section (## Teacher Notes) with: common mistakes (2-3), "
+        "time adjustments if running short/long, what the next lesson should cover.\n\n"
 
-        "IMPORTANT: Replace every [bracket] with ACTUAL content. Write real questions with "
-        "real numbers and real solutions. Do not leave any brackets or placeholders.\n\n"
-        "FORMAT with clean markdown: use ## for each major section header (e.g., ## Lesson Overview, ## Warm-Up / Hook), "
-        "### for sub-sections, **bold** for key terms and labels, numbered lists for steps and questions, "
-        "- for bullet points, --- for section dividers."
+        "IMPORTANT: Replace every [bracket] with ACTUAL content. Write real questions with real numbers and real solutions."
     )
 
     # Use higher token limit for detailed, example-rich output
@@ -889,13 +866,17 @@ class ClassActivityRequest(BaseModel):
     grade_level: str
     subject: str = ""
     activity_type: str = "group"
+    activity_types: list[str] = []
     num_activities: int = 3
     duration: str = "30 minutes"
     group_size: str = "4-5 students"
+    blooms_level: str = "understand"
     learning_outcomes: str = ""
     materials_available: str = ""
     additional_instructions: str = ""
     source_material: str = ""
+    topic_description: str = ""
+    topic_track: str = "core"
 
 @app.post("/api/class-activity")
 def generate_class_activity(req: ClassActivityRequest):
@@ -909,8 +890,33 @@ def generate_class_activity(req: ClassActivityRequest):
         "discussion":  "structured discussion activities like Socratic seminars, debates, or think-pair-share",
         "game":        "educational games and gamified learning activities",
         "creative":    "creative expression activities like art, drama, writing, or multimedia projects",
-        "mixed":       "a balanced mix of group work, hands-on activities, and creative exercises",
     }
+
+    blooms_map = {
+        "remember":   "Remember — recall facts, terms, basic concepts",
+        "understand": "Understand — explain ideas or concepts in own words",
+        "apply":      "Apply — use information in new situations / solve problems",
+        "analyze":    "Analyze — draw connections, compare, contrast, break down ideas",
+        "evaluate":   "Evaluate — justify a decision, judge information, critique",
+        "create":     "Create — produce new or original work, design, compose",
+    }
+
+    # Multi-select activity types take priority over the legacy single value.
+    selected_types = [t for t in (req.activity_types or []) if t in activity_map]
+    if not selected_types and req.activity_type in activity_map:
+        selected_types = [req.activity_type]
+    if not selected_types:
+        selected_types = ["group"]
+    types_description = "; ".join(activity_map[t] for t in selected_types)
+    blooms_descriptor = blooms_map.get((req.blooms_level or "understand").lower(), blooms_map["understand"])
+
+    scope_block = ""
+    if req.topic_description.strip():
+        scope_label = "OFFICIAL CBSE/NCERT CHAPTER SCOPE" if req.topic_track == "core" else "TOPIC SCOPE"
+        scope_block = (
+            f"\n{scope_label}: \"{req.topic_description.strip()}\"\n"
+            "ALL activities MUST stay strictly within this scope. Do NOT introduce concepts outside it.\n"
+        )
 
     lang = get_grade_language_profile(req.grade_level)
 
@@ -986,7 +992,24 @@ def generate_class_activity(req: ClassActivityRequest):
         "active learning, NEP 2020 pedagogy, and experiential education. "
         "You create activities that are SPECIFIC, ACTIONABLE, and directly tied to curriculum outcomes. "
         "Every activity you design has been tested in real Indian classrooms and works with commonly available materials. "
-        "You never write vague activities — every step is detailed, timed, and has clear student roles. "
+        "You never write vague activities — every step is detailed, timed, and has clear student roles.\n\n"
+        "DEFAULT MATERIALS POLICY (NON-NEGOTIABLE):\n"
+        "- Use ONLY locally available, low-cost, everyday materials by default — paper, pencils, chalk, chart paper, "
+        "newspapers, used cardboard, bottle caps, pebbles, leaves, string, rubber bands, classroom furniture, and "
+        "the human body itself (claps, movement, voice). Items every Indian government / aided school already has.\n"
+        "- NEVER suggest premium materials (laminated cards, branded kits, store-bought science kits, expensive "
+        "tech) unless the teacher explicitly lists them under MATERIALS AVAILABLE.\n"
+        "- This rule applies even if the teacher's ADDITIONAL INSTRUCTIONS is empty — it is your default behaviour, "
+        "not a request to be asked for.\n\n"
+        "DURATION POLICY (NON-NEGOTIABLE):\n"
+        "- The DURATION PER ACTIVITY value the teacher provided is a HARD constraint. Sum of timed sub-steps in "
+        "each activity MUST equal that duration (±10%). Do NOT design activities that overflow the time slot.\n\n"
+        "SCOPE POLICY:\n"
+        "- If a CBSE/NCERT chapter scope or topic scope is given, every activity must stay strictly within that "
+        "scope. Do not pull in concepts from later chapters or unrelated topics.\n\n"
+        "BLOOM'S ALIGNMENT:\n"
+        "- Each activity's cognitive demand must align with the Bloom's level given. Verbs in learning outcomes "
+        "and tasks must match (e.g. 'design / create' for Create; 'recall / list' for Remember).\n\n"
         f"{lang} "
         + ("When source material is provided, align ALL activities directly to that content. " if req.source_material.strip() else "")
         + "Format output with CLEAN MARKDOWN for beautiful readability:\n"
@@ -1003,20 +1026,24 @@ def generate_class_activity(req: ClassActivityRequest):
         f"Create {req.num_activities} detailed, classroom-tested activities for {req.grade_level} students.\n\n"
         f"TOPIC: {req.topic}\n"
         f"{'SUBJECT: ' + req.subject if req.subject else ''}\n"
-        f"ACTIVITY TYPE: {activity_map.get(req.activity_type, activity_map['mixed'])}\n"
-        f"DURATION PER ACTIVITY: {req.duration}\n"
+        f"ACTIVITY TYPES (mix freely across these — at least one activity per selected type when {req.num_activities} >= number of types): {types_description}\n"
+        f"DURATION PER ACTIVITY (HARD constraint): {req.duration}\n"
         f"GROUP SIZE: {req.group_size}\n"
+        f"BLOOM'S LEVEL TARGET: {blooms_descriptor}\n"
+        f"{scope_block}"
         f"{'LEARNING OUTCOMES TO ADDRESS: ' + req.learning_outcomes if req.learning_outcomes else ''}\n"
-        f"{'MATERIALS AVAILABLE: ' + req.materials_available if req.materials_available else ''}\n"
+        f"{'MATERIALS AVAILABLE: ' + req.materials_available if req.materials_available else '(none specified — default to locally available, low-cost everyday materials only)'}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
         f"{material_note}\n\n"
         f"{subject_activity_hints}\n"
         "ACTIVITY QUALITY RULES (CRITICAL):\n"
         "- Every activity must be SPECIFIC to the topic — not a generic 'discuss in groups' activity\n"
-        "- Include exact materials with quantities (e.g., '4 chart papers, 12 colored markers, 1 protractor per group')\n"
-        "- Time every sub-step (e.g., 'Step 1: Distribute materials (2 min), Step 2: Explain task (3 min)')\n"
+        "- Include exact materials with quantities (e.g., '4 chart papers, 12 chalk pieces, 1 measuring tape per group')\n"
+        "- Materials MUST be locally available and low-cost unless the teacher explicitly listed otherwise\n"
+        "- Time every sub-step. Sum of sub-steps in each activity = duration above (±10%)\n"
         "- Define clear student roles within groups (recorder, presenter, material manager, etc.)\n"
-        "- Include a specific assessment rubric or checklist for each activity\n\n"
+        "- Include a specific assessment rubric or checklist for each activity\n"
+        "- Align task verbs and assessment with the Bloom's level above\n\n"
         "FOR EACH ACTIVITY, INCLUDE ALL OF THE FOLLOWING:\n\n"
         "1. ACTIVITY TITLE - Creative, engaging name that hints at the concept\n"
         "2. LEARNING OUTCOMES - 2-3 specific SWBAT outcomes aligned to NCERT/CBSE\n"

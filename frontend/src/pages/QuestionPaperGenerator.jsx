@@ -327,12 +327,15 @@ export default function QuestionPaperGenerator() {
           📋 History
         </button>
         <h1 style={{ flex: 1, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-1)', margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-          📄 Question Paper Generator
+          <img src="/codevidhya_logo.jfif" alt="CodeVidhya"
+            style={{ width: 36, height: 36, borderRadius: 10, background: '#fff', padding: 3, border: '1.5px solid #c7d2fe', objectFit: 'contain' }}
+            onError={(e) => { e.currentTarget.style.display='none' }} />
+          Question Paper Generator
           <UsageCounter ref={usageCounterRef} teacherId={TEACHER_ID} toolName="question-paper" />
         </h1>
       </div>
       <p style={{ color: 'var(--text-2)', fontSize: '0.9rem', marginBottom: 28 }}>
-        Generate NCERT-aligned question papers with proper sections, marks, and answer keys
+        Generate question papers with proper sections, marks, and answer keys
       </p>
 
       <div style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 16, padding: 28, display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -342,13 +345,39 @@ export default function QuestionPaperGenerator() {
         <div><Label>Grade Level *</Label><SelectDown value={grade} onChange={setGrade} options={GRADES} /></div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div><Label>Subject *</Label><SelectDown value={subject} onChange={setSubject} options={subjectList.length ? subjectList : ['Select grade first']} placeholder="Select subject" /></div>
-          <div><Label>Topic *</Label>
-            {topicList.length > 0
-              ? <SelectDown value={topic} onChange={setTopic} options={topicList.map(t => typeof t === 'string' ? t : { value: t.label || t.topic, label: t.label || t.topic })} placeholder="Select topic" />
-              : <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="Enter topic..."
-                  style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 10, fontFamily: 'inherit', fontSize: '0.9rem', color: 'var(--text-1)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box' }} />
-            }
+          <div>
+            <Label>Subject *</Label>
+            {subjectList.length > 0 && (
+              <SelectDown
+                value={subjectList.includes(subject) ? subject : ''}
+                onChange={setSubject}
+                options={subjectList}
+                placeholder="Select subject"
+              />
+            )}
+            <input
+              value={subjectList.includes(subject) ? '' : subject}
+              onChange={e => setSubject(e.target.value)}
+              placeholder={subjectList.length ? 'Or type your own subject…' : 'Type subject (e.g. Artificial Intelligence)'}
+              style={{ marginTop: subjectList.length ? 8 : 0, width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 10, fontFamily: 'inherit', fontSize: '0.9rem', color: 'var(--text-1)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
+          <div>
+            <Label>Topic *</Label>
+            {topicList.length > 0 && (
+              <SelectDown
+                value={topicList.some(t => (typeof t === 'string' ? t : (t.label || t.topic)) === topic) ? topic : ''}
+                onChange={setTopic}
+                options={topicList.map(t => typeof t === 'string' ? t : { value: t.label || t.topic, label: t.label || t.topic })}
+                placeholder="Select topic"
+              />
+            )}
+            <input
+              value={topicList.some(t => (typeof t === 'string' ? t : (t.label || t.topic)) === topic) ? '' : topic}
+              onChange={e => setTopic(e.target.value)}
+              placeholder={topicList.length ? 'Or type your own topic…' : 'Type topic…'}
+              style={{ marginTop: topicList.length ? 8 : 0, width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 10, fontFamily: 'inherit', fontSize: '0.9rem', color: 'var(--text-1)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box' }}
+            />
           </div>
         </div>
 

@@ -14,13 +14,21 @@ const API = window.location.hostname === 'localhost' ? 'http://localhost:8001' :
 const STORAGE_KEY = 'classroom-result-activity'
 
 const activityTypes = [
-  { value: 'group',      label: 'Group Activities' },
-  { value: 'project',    label: 'Project-Based' },
-  { value: 'hands_on',   label: 'Hands-On / Lab' },
-  { value: 'discussion', label: 'Discussion / Debate' },
-  { value: 'game',       label: 'Educational Games' },
-  { value: 'creative',   label: 'Creative Expression' },
-  { value: 'mixed',      label: 'Mixed Activities' },
+  { value: 'group',      label: 'Group Activities',     icon: '👥' },
+  { value: 'project',    label: 'Project-Based',         icon: '🛠️' },
+  { value: 'hands_on',   label: 'Hands-On / Lab',        icon: '🔬' },
+  { value: 'discussion', label: 'Discussion / Debate',   icon: '💬' },
+  { value: 'game',       label: 'Educational Games',     icon: '🎲' },
+  { value: 'creative',   label: 'Creative Expression',   icon: '🎨' },
+]
+
+const bloomsLevels = [
+  { value: 'remember',   label: 'Remember' },
+  { value: 'understand', label: 'Understand' },
+  { value: 'apply',      label: 'Apply' },
+  { value: 'analyze',    label: 'Analyze' },
+  { value: 'evaluate',   label: 'Evaluate' },
+  { value: 'create',     label: 'Create' },
 ]
 
 const durations  = ['15 minutes','20 minutes','30 minutes','45 minutes','60 minutes']
@@ -80,12 +88,18 @@ const FORM_BODY = { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 24px 2
 
 const ErrMsg = ({ msg }) => msg ? <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: 4, fontWeight: 500 }}>⚠ {msg}</div> : null
 
-// ── Track tabs (Core / Miscellaneous) ─────────────────
-function TrackTabs({ value, onChange, coreCount, miscCount, disabled }) {
+const HIDE_CORE_GRADES = ['Kindergarten', 'College']
+const isHideCoreGrade = (g) => HIDE_CORE_GRADES.includes(g)
+
+// ── Track tabs (Core / Suggestions / Type) — grade-aware ─────────────────
+function TrackTabs({ value, onChange, coreCount, miscCount, disabled, grade, hideCoreWhenEmpty = false, showType = true }) {
+  const hideCore = isHideCoreGrade(grade) || (hideCoreWhenEmpty && coreCount === 0)
+  const miscLabel = isHideCoreGrade(grade) ? 'Suggestions' : 'Miscellaneous'
   const tabs = [
-    { key: 'core', label: 'Core (CBSE/NCERT)', count: coreCount, color: '#10b981', bg: '#ecfdf5', border: '#bbf7d0' },
-    { key: 'misc', label: 'Miscellaneous',     count: miscCount, color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
-  ]
+    !hideCore && { key: 'core', label: 'Core (CBSE/NCERT)', count: coreCount, color: '#10b981', bg: '#ecfdf5', border: '#bbf7d0' },
+    { key: 'misc', label: miscLabel, count: miscCount, color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
+    showType && { key: 'type', label: '✏️ Type', count: null, color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
+  ].filter(Boolean)
   return (
     <div style={{ display: 'flex', gap: 6, marginBottom: 6, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
       {tabs.map(t => {
@@ -100,10 +114,12 @@ function TrackTabs({ value, onChange, coreCount, miscCount, disabled }) {
             transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           }}>
             {t.label}
-            <span style={{
-              fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: 8,
-              background: active ? t.color : '#e5e7eb', color: active ? '#fff' : 'var(--text-2)',
-            }}>{t.count}</span>
+            {t.count !== null && (
+              <span style={{
+                fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                background: active ? t.color : '#e5e7eb', color: active ? '#fff' : 'var(--text-2)',
+              }}>{t.count}</span>
+            )}
           </button>
         )
       })}
@@ -115,8 +131,9 @@ export default function ClassActivityGenerator() {
   const { teacherId: TEACHER_ID } = useAuth()
   const [form, setForm] = useState({
     grade_level: '', subject: '', topic: '',
-    activity_type: 'group', num_activities: 3,
+    activity_types: ['group'], num_activities: 3,
     duration: '30 minutes', group_size: '4-5 students',
+    blooms_level: 'understand',
     learning_outcomes: '', materials_available: '',
     additional_instructions: '',
   })
@@ -167,22 +184,34 @@ export default function ClassActivityGenerator() {
   // Reset dependent fields when parents change
   const onGradeChange = (val) => {
     setForm(f => ({ ...f, grade_level: val, subject: '', topic: '' }))
-    setSubjectTrack('core'); setTopicTrack('core'); setCustomTopic('')
+    const defaultTrack = isHideCoreGrade(val) ? 'misc' : 'core'
+    setSubjectTrack(defaultTrack); setTopicTrack(defaultTrack); setCustomTopic('')
     setErrors({})
   }
   const onSubjectTrackChange = (t) => {
     setSubjectTrack(t)
     setForm(f => ({ ...f, subject: '', topic: '' }))
-    setTopicTrack('core'); setCustomTopic('')
+    if (t === 'type') setTopicTrack('type')
+    else if (t === 'misc') setTopicTrack('misc')
+    else setTopicTrack(isHideCoreGrade(form.grade_level) ? 'misc' : 'core')
+    setCustomTopic('')
   }
   const onSubjectChange = (val) => {
     setForm(f => ({ ...f, subject: val, topic: '' }))
-    if (subjectTrack === 'misc') setTopicTrack('misc')
-    else setTopicTrack('core')
+    if (subjectTrack === 'type') setTopicTrack('type')
+    else if (subjectTrack === 'misc') setTopicTrack('misc')
+    else setTopicTrack(isHideCoreGrade(form.grade_level) ? 'misc' : 'core')
     setCustomTopic('')
   }
   const onTopicTrackChange = (t) => {
     setTopicTrack(t); setForm(f => ({ ...f, topic: '' })); setCustomTopic('')
+  }
+  const toggleActivityType = (v) => {
+    setForm(f => {
+      const has = f.activity_types.includes(v)
+      const next = has ? f.activity_types.filter(t => t !== v) : [...f.activity_types, v]
+      return { ...f, activity_types: next.length ? next : f.activity_types }
+    })
   }
 
   // Build topic metadata for backend
@@ -205,6 +234,7 @@ export default function ClassActivityGenerator() {
     if (!form.subject)      e.subject     = 'Please select a subject.'
     const { topic } = buildTopicMeta()
     if (!topic) e.topic = 'Please select or type a topic.'
+    if (!form.activity_types.length) e.activity_types = 'Pick at least one activity type.'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -231,6 +261,8 @@ export default function ClassActivityGenerator() {
     try {
       const payload = {
         ...form,
+        // Keep legacy single-value field for backward compatibility (first selected type).
+        activity_type: form.activity_types[0] || 'group',
         topic,
         topic_description: description,
         topic_track: track,
@@ -282,13 +314,10 @@ export default function ClassActivityGenerator() {
               </button>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 40, height: 40, background: ACCENT_SOFT, border: `1.5px solid ${ACCENT_MID}`, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="1.9" strokeLinecap="round">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                  <circle cx="9" cy="7" r="4"/>
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                </svg>
+              <div style={{ width: 40, height: 40, background: '#fff', border: `1.5px solid ${ACCENT_MID}`, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                <img src="/codevidhya_logo.jfif" alt="CodeVidhya"
+                  style={{ width: '82%', height: '82%', objectFit: 'contain' }}
+                  onError={(e) => { e.currentTarget.style.display='none' }} />
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -314,7 +343,7 @@ export default function ClassActivityGenerator() {
               <ErrMsg msg={errors.grade_level} />
             </div>
 
-            {/* STEP 2 — Subject (Core/Misc tabs) */}
+            {/* STEP 2 — Subject (Core / Suggestions / Type tabs) */}
             <div className="form-group">
               <label className="form-label">
                 Subject <span style={{ color: '#ef4444' }}>*</span>
@@ -326,14 +355,27 @@ export default function ClassActivityGenerator() {
                 coreCount={coreSubjects.length}
                 miscCount={miscSubjects.length}
                 disabled={subjectLocked}
+                grade={form.grade_level}
               />
-              <CustomSelect value={form.subject} onChange={e => onSubjectChange(e.target.value)}
-                style={{ borderColor: errors.subject ? '#fca5a5' : ACCENT_MID, opacity: subjectLocked ? 0.5 : 1 }}>
-                <option value="">{subjectLocked ? 'Pick grade first…' : (subjectTrack === 'core' ? '— Pick CBSE subject —' : '— Pick miscellaneous subject —')}</option>
-                {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
-              </CustomSelect>
-              {!subjectLocked && subjectTrack === 'core' && coreSubjects.length === 0 && (
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>No CBSE TOC entries for this grade — try the Miscellaneous tab.</div>
+              {subjectTrack === 'type' ? (
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Artificial Intelligence, Robotics, Mathematics…"
+                  value={form.subject}
+                  onChange={e => onSubjectChange(e.target.value)}
+                  disabled={subjectLocked}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10,
+                    border: `1.5px solid ${errors.subject ? '#fca5a5' : ACCENT_MID}`,
+                    fontFamily: 'inherit', fontSize: '0.9rem', background: 'var(--bg)',
+                    outline: 'none', boxSizing: 'border-box', opacity: subjectLocked ? 0.5 : 1 }}
+                />
+              ) : (
+                <CustomSelect value={form.subject} onChange={e => onSubjectChange(e.target.value)}
+                  style={{ borderColor: errors.subject ? '#fca5a5' : ACCENT_MID, opacity: subjectLocked ? 0.5 : 1 }}>
+                  <option value="">{subjectLocked ? 'Pick grade first…' : (subjectTrack === 'core' ? '— Pick CBSE subject —' : (isHideCoreGrade(form.grade_level) ? '— Pick a suggestion —' : '— Pick miscellaneous subject —'))}</option>
+                  {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                </CustomSelect>
               )}
               <ErrMsg msg={errors.subject} />
             </div>
@@ -353,18 +395,22 @@ export default function ClassActivityGenerator() {
                 coreCount={coreTopics.length}
                 miscCount={miscTopics.length}
                 disabled={topicLocked}
+                grade={form.grade_level}
+                hideCoreWhenEmpty
               />
-              <CustomSelect value={topicOptions.some(t => t.label === form.topic) ? form.topic : ''}
-                onChange={e => { set('topic', e.target.value); setCustomTopic('') }}
-                style={{ borderColor: errors.topic ? '#fca5a5' : ACCENT_MID, opacity: topicLocked ? 0.5 : 1 }}>
-                <option value="">
-                  {topicLocked ? 'Pick subject first…' :
-                    (topicTrack === 'core'
-                      ? (coreTopics.length === 0 ? 'No CBSE chapters for this subject' : '— Pick NCERT chapter / topic —')
-                      : '— Pick miscellaneous topic —')}
-                </option>
-                {topicOptions.map(t => <option key={t.label} value={t.label}>{t.chapter ? `${t.chapter} — ${t.label}` : t.label}</option>)}
-              </CustomSelect>
+              {topicTrack !== 'type' && (
+                <CustomSelect value={topicOptions.some(t => t.label === form.topic) ? form.topic : ''}
+                  onChange={e => { set('topic', e.target.value); setCustomTopic('') }}
+                  style={{ borderColor: errors.topic ? '#fca5a5' : ACCENT_MID, opacity: topicLocked ? 0.5 : 1 }}>
+                  <option value="">
+                    {topicLocked ? 'Pick subject first…' :
+                      (topicTrack === 'core'
+                        ? '— Pick NCERT chapter / topic —'
+                        : (isHideCoreGrade(form.grade_level) ? '— Pick a suggested topic —' : '— Pick miscellaneous topic —'))}
+                  </option>
+                  {topicOptions.map(t => <option key={t.label} value={t.label}>{t.chapter ? `${t.chapter} — ${t.label}` : t.label}</option>)}
+                </CustomSelect>
+              )}
 
               {/* Topic description preview */}
               {!topicLocked && (() => {
@@ -398,13 +444,41 @@ export default function ClassActivityGenerator() {
               <ErrMsg msg={errors.topic} />
             </div>
 
-            {/* Activity Type */}
+            {/* Activity Types — multi-select */}
             <div className="form-group">
-              <label className="form-label">Activity Type</label>
-              <select className="form-select" value={form.activity_type} onChange={e => set('activity_type', e.target.value)}
-                style={{ borderColor: ACCENT_MID }}>
-                {activityTypes.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-              </select>
+              <label className="form-label">
+                Activity Types
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 500, marginLeft: 6 }}>
+                  (select one or more)
+                </span>
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {activityTypes.map(a => {
+                  const active = form.activity_types.includes(a.value)
+                  return (
+                    <button key={a.value} type="button" onClick={() => toggleActivityType(a.value)} style={{
+                      padding: '9px 10px', borderRadius: 10,
+                      border: active ? `1.5px solid ${ACCENT}` : '1.5px solid var(--border)',
+                      background: active ? ACCENT_SOFT : 'var(--surface)',
+                      color: active ? ACCENT : 'var(--text-2)',
+                      fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                      textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8,
+                      fontFamily: 'var(--font)', transition: 'all 0.15s',
+                    }}>
+                      <span style={{
+                        width: 16, height: 16, borderRadius: 4,
+                        border: active ? `2px solid ${ACCENT}` : '1.5px solid #cbd5e1',
+                        background: active ? ACCENT : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        {active && <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"><polyline points="2 6 5 9 10 3"/></svg>}
+                      </span>
+                      <span style={{ fontSize: '1rem' }}>{a.icon}</span>
+                      <span>{a.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
             {/* Number of Activities + Duration row */}
@@ -431,6 +505,15 @@ export default function ClassActivityGenerator() {
               <select className="form-select" value={form.group_size} onChange={e => set('group_size', e.target.value)}
                 style={{ borderColor: ACCENT_MID }}>
                 {groupSizes.map(g => <option key={g}>{g}</option>)}
+              </select>
+            </div>
+
+            {/* Bloom's Level */}
+            <div className="form-group">
+              <label className="form-label">Bloom's Level</label>
+              <select className="form-select" value={form.blooms_level} onChange={e => set('blooms_level', e.target.value)}
+                style={{ borderColor: ACCENT_MID }}>
+                {bloomsLevels.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
               </select>
             </div>
 
