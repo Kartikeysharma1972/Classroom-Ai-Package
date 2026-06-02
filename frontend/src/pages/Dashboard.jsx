@@ -92,10 +92,42 @@ const tools = [
     time: '~8s',
     isNew: true,
   },
+  {
+    to: '/vocabulary',
+    color: '#ea580c', bg: '#fff7ed', border: '#fed7aa',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ea580c" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        <line x1="8" y1="7" x2="16" y2="7"/>
+        <line x1="8" y1="11" x2="14" y2="11"/>
+      </svg>
+    ),
+    title: 'Vocabulary Mastery',
+    desc: 'Grade-calibrated vocabulary worksheets with matching, fill-in-blank, and sentence writing.',
+    features: ['K-12 grades', 'Answer key', 'Export'],
+    time: '~15s',
+    isNew: true,
+  },
+  {
+    to: '/comprehension',
+    color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+      </svg>
+    ),
+    title: 'Reading Comprehension',
+    desc: 'AI-generated passages with text-dependent questions, annotation guide, and vocabulary in context.',
+    features: ['Passages', 'Questions', 'Vocab'],
+    time: '~20s',
+    isNew: true,
+  },
 ]
 
 const stats = [
-  { label: 'AI tools', value: '6', sub: 'Production-ready', color: '#4f46e5', bg: '#eef2ff', icon: '🛠' },
+  { label: 'AI tools', value: '8', sub: 'Production-ready', color: '#4f46e5', bg: '#eef2ff', icon: '🛠' },
   { label: 'Avg. time saved', value: '10h+', sub: 'every week', color: '#059669', bg: '#ecfdf5', icon: '⏱' },
   { label: 'Grade coverage', value: 'K–12', sub: 'All Indian boards', color: '#d97706', bg: '#fffbeb', icon: '🎓' },
   { label: 'Output speed', value: '<30s', sub: 'per generation', color: '#7c3aed', bg: '#f5f3ff', icon: '⚡' },
@@ -168,8 +200,8 @@ export default function Dashboard() {
               fontSize: 15, opacity: 0.82, maxWidth: 520,
               lineHeight: 1.65, marginBottom: 22, fontWeight: 400,
             }}>
-              Six AI tools designed exclusively for teachers — generate lesson plans, worksheets,
-              feedback, even debug student code. Pick a tool to start.
+              Eight AI tools designed exclusively for teachers — generate lesson plans, worksheets,
+              vocabulary, comprehension, feedback, even debug student code. Pick a tool to start.
             </p>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={() => navigate('/lesson-plan')} style={{
@@ -276,7 +308,7 @@ export default function Dashboard() {
             letterSpacing: '-0.3px', marginBottom: 3,
           }}>Your Teaching Tools</h2>
           <p style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 500 }}>
-            Six AI-powered tools, one place — pick any to get started.
+            Eight AI-powered tools, one place — pick any to get started.
           </p>
         </div>
         <span style={{

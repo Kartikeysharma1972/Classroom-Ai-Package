@@ -11,6 +11,8 @@ const titles = {
   '/teacher-insights':{ label: 'Teacher Insights',         sub: 'Analytics and insights from your classroom.' },
   '/code-debugger':   { label: 'Code Debugger',            sub: 'Paste student code — AI finds bugs and teaches the fix.' },
   '/feedback':        { label: 'Feedback Writer',          sub: 'Personalized student feedback with star ratings.' },
+  '/vocabulary':      { label: 'Vocabulary Mastery',       sub: 'Grade-calibrated vocabulary worksheets with matching, fill-in-blank, and sentence writing.' },
+  '/comprehension':   { label: 'Reading Comprehension',    sub: 'AI-generated reading passages with text-dependent questions and vocabulary in context.' },
 }
 
 export default function Header() {

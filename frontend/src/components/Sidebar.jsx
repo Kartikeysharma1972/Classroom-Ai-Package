@@ -68,8 +68,37 @@ const navGroups = [
     ],
   },
   {
-    title: 'CS & Feedback',
+    title: 'Language & Reading',
     badge: 'NEW',
+    items: [
+      {
+        to: '/vocabulary',
+        label: 'Vocabulary',
+        icon: (
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <line x1="8" y1="7" x2="16" y2="7"/>
+            <line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        ),
+      },
+      {
+        to: '/comprehension',
+        label: 'Comprehension',
+        icon: (
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            <line x1="6" y1="8" x2="6" y2="8"/>
+            <line x1="18" y1="8" x2="18" y2="8"/>
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    title: 'CS & Feedback',
     items: [
       {
         to: '/code-debugger',
@@ -251,7 +280,7 @@ export default function Sidebar() {
           <div style={{
             fontSize: 11, opacity: 0.75, lineHeight: 1.5,
             marginBottom: 10, position: 'relative',
-          }}>Unlimited AI generations + all 6 tools</div>
+          }}>Unlimited AI generations + all 8 tools</div>
           <button style={{
             width: '100%', padding: '7px', borderRadius: 8,
             border: 'none', background: '#fff', color: '#4f46e5',

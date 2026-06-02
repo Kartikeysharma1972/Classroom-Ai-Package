@@ -22,6 +22,62 @@ from database import db
 from mcp_tools import get_chat_history, check_usage_limit, increment_usage
 from auth import register_user, login_user, verify_token, logout_user
 
+# ─── VOCABULARY MASTERY & READING COMPREHENSION TOOL IMPORTS ─────
+import re as _re_mod
+import uuid as _uuid_mod
+
+# Vocabulary Mastery supporting modules (renamed copies)
+from vocab_nlp import (
+    get_grade_prompt_context as vocab_get_grade_prompt_context,
+    analyze_text_grade as vocab_analyze_text_grade,
+    GRADE_PROFILES as VOCAB_GRADE_PROFILES,
+    get_word_count as vocab_get_word_count,
+)
+from vocab_rag import rag_retriever as vocab_rag_retriever
+from vocab_db import (
+    init_db as vocab_init_db,
+    create_session as vocab_create_session,
+    save_worksheet as vocab_save_worksheet,
+    get_session_history as vocab_get_session_history,
+    get_all_worksheets as vocab_get_all_worksheets,
+    save_rag_document as vocab_save_rag_document,
+)
+from tool_security import (
+    assert_public_url, read_upload_capped, client_ip,
+    generate_limiter, extract_limiter, upload_limiter,
+)
+
+# Reading Comprehension supporting modules (renamed copies)
+from reading_nlp import (
+    get_grade_prompt_context as reading_get_grade_prompt_context,
+    analyze_text_grade as reading_analyze_text_grade,
+    GRADE_PROFILES as READING_GRADE_PROFILES,
+    get_reading_counts,
+)
+from reading_db import (
+    init_db as reading_init_db,
+    create_session as reading_create_session,
+    save_comprehension as reading_save_comprehension,
+    get_session_history as reading_get_session_history,
+    get_all_comprehensions as reading_get_all_comprehensions,
+    save_rag_document as reading_save_rag_document,
+    get_all_rag_documents as reading_get_all_rag_documents,
+)
+
+# Initialize tool databases at import time
+try:
+    vocab_init_db()
+except Exception as _e:
+    print(f"[startup] Vocab DB init error: {_e}")
+try:
+    reading_init_db()
+except Exception as _e:
+    print(f"[startup] Reading DB init error: {_e}")
+try:
+    vocab_rag_retriever.build_index()
+except Exception as _e:
+    print(f"[startup] Vocab RAG build error: {_e}")
+
 print("[DEBUG] All imports complete")
 load_dotenv()
 print("[DEBUG] Creating FastAPI app...")
@@ -2557,6 +2613,1397 @@ def generate_feedback(req: FeedbackRequest):
         "tone": req.tone,
         "generated_feedback": cleaned,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ─── VOCABULARY MASTERY TOOL ENDPOINTS ──────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Pydantic models ──
+
+class VocabWorksheetRequest(BaseModel):
+    topic: str
+    grade_level: int
+    learning_objective: str
+    source_text: str | None = None
+    additional_context: str | None = None
+    session_id: str | None = None
+
+class VocabSessionCreate(BaseModel):
+    metadata: dict | None = None
+
+class VocabRAGDocRequest(BaseModel):
+    content: str
+    topic: str | None = ""
+    grade_level: int | None = 0
+
+
+# ── Vocabulary helper functions ──
+
+def _vocab_count_syllables(word: str) -> int:
+    word = (word or "").lower().strip(".,!?;:'\"")
+    if not word:
+        return 1
+    count = len(_re_mod.findall(r'[aeiouy]+', word))
+    if word.endswith('e') and count > 1:
+        count -= 1
+    return max(count, 1)
+
+VOCAB_GRADE_VOCAB_CAPS = {
+    1: {"max_syllables": 2, "max_chars": 7},
+    2: {"max_syllables": 3, "max_chars": 8},
+    3: {"max_syllables": 3, "max_chars": 9},
+}
+
+def _vocab_check_grade_complexity(data: dict, grade_level: int) -> "str | None":
+    caps = VOCAB_GRADE_VOCAB_CAPS.get(grade_level)
+    if not caps:
+        return None
+    too_complex = []
+    for vw in data.get("vocab_words", []):
+        word = (vw.get("word") or "").strip().lower()
+        if not word:
+            continue
+        if _vocab_count_syllables(word) > caps["max_syllables"] or len(word) > caps["max_chars"]:
+            too_complex.append(word)
+    if too_complex:
+        return (
+            f"Grade {grade_level} vocabulary must be at most {caps['max_syllables']} syllables and "
+            f"{caps['max_chars']} letters per word. These words are too complex: "
+            f"{', '.join(too_complex[:5])}. REPLACE each one with a simpler Grade {grade_level} word "
+            f"on the same topic (1-2 syllable sight word, CVC pattern, decodable phonics)."
+        )
+    return None
+
+def _vocab_validate(data: dict, min_items: int = 8) -> "str | None":
+    vocab_words = data.get("vocab_words")
+    if not isinstance(vocab_words, list) or len(vocab_words) < min_items:
+        return f"vocab_words must have at least {min_items} items, got {len(vocab_words) if isinstance(vocab_words, list) else 'missing'}"
+    matching = data.get("matching_section")
+    if not isinstance(matching, dict) or not matching.get("items"):
+        return "matching_section is missing or has no items"
+    fib = data.get("fill_in_blank")
+    if not isinstance(fib, dict):
+        return "fill_in_blank section is missing"
+    sentences = fib.get("sentences")
+    if not isinstance(sentences, list) or len(sentences) < min_items:
+        return f"fill_in_blank.sentences must have at least {min_items} items, got {len(sentences) if isinstance(sentences, list) else 'missing'}"
+    sw = data.get("sentence_writing")
+    if not isinstance(sw, dict) or not sw.get("prompts"):
+        return "sentence_writing section is missing or has no prompts"
+    prompts = sw.get("prompts")
+    if not isinstance(prompts, list) or len(prompts) < min_items:
+        return f"sentence_writing.prompts must have at least {min_items} items, got {len(prompts) if isinstance(prompts, list) else 'missing'}"
+    return None
+
+
+# Groq fallback model list (shared by both tools)
+_TOOL_FALLBACK_MODELS = [
+    OPENAI_MODEL,
+    "llama-3.1-8b-instant",
+    "deepseek-r1-distill-llama-70b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+]
+
+
+# ── Vocabulary Sessions ──
+
+@app.post("/api/vocabulary/sessions")
+async def vocab_new_session(req: VocabSessionCreate):
+    session_id = vocab_create_session(req.metadata)
+    return {"session_id": session_id}
+
+@app.get("/api/vocabulary/sessions/{session_id}/history")
+async def vocab_session_history(session_id: str):
+    return {"session_id": session_id, "history": vocab_get_session_history(session_id)}
+
+@app.get("/api/vocabulary/worksheets")
+async def vocab_list_worksheets(limit: int = 20):
+    return {"worksheets": vocab_get_all_worksheets(limit)}
+
+
+# ── Vocabulary Generate (SSE streaming) ──
+
+@app.post("/api/vocabulary/generate")
+async def vocab_generate_worksheet(req: VocabWorksheetRequest, request: Request):
+    from fastapi.responses import StreamingResponse as _SR
+
+    await generate_limiter.check(client_ip(request))
+    session_id = req.session_id or vocab_create_session()
+
+    vocab_rag_retriever.build_index()
+    rag_context = vocab_rag_retriever.build_context(
+        f"{req.topic} grade {req.grade_level} {req.learning_objective}",
+        grade_level=req.grade_level,
+    )
+    grade_ctx = vocab_get_grade_prompt_context(req.grade_level)
+
+    source_block = (
+        "\nSOURCE MATERIAL (MANDATORY -- pick vocabulary words from THIS content; "
+        "definitions, examples and context sentences must reflect what the source actually says):\n"
+        f"---\n{req.source_text[:6000]}\n---\n"
+    ) if req.source_text else ""
+    additional_block = f"Additional Context: {req.additional_context}" if req.additional_context else ""
+    rag_block = f"\n{rag_context}" if rag_context else ""
+    ctx_block = f"{source_block}{additional_block}\n{rag_block}".strip()
+
+    def _build_prompt(extra_instructions: str = "") -> str:
+        p = VOCAB_GRADE_PROFILES.get(req.grade_level, VOCAB_GRADE_PROFILES[7])
+        n = vocab_get_word_count(req.grade_level)
+
+        return f"""You are an expert educator and curriculum specialist.
+Your task is to create a grade-calibrated Vocabulary Mastery Worksheet.
+
+{grade_ctx}
+
+CONTENT DETAILS:
+Topic: {req.topic}
+Learning Objective: {req.learning_objective}
+{ctx_block}
+
+CRITICAL RULES:
+1. Generate EXACTLY {n} vocabulary words -- this count is calibrated for Grade {req.grade_level} attention span. Do NOT generate more or fewer.
+2. ALL {n} vocabulary words must be exactly right for Grade {req.grade_level} students (age {req.grade_level + 5}-{req.grade_level + 6}).
+3. Every definition must use SIMPLER words than the target word -- a Grade {req.grade_level} student must understand it.
+4. Fill-in-blank sentences must be at Grade {req.grade_level} reading level: {p['sentence']}
+5. Sentence writing hints must be Grade {req.grade_level} appropriate: {p['hint_style']}
+6. Do NOT use words from other grade levels. Do NOT use placeholder words like 'word1'.
+{"7. SOURCE MATERIAL is provided above and is the AUTHORITATIVE basis for this worksheet. EVERY vocabulary word MUST be picked from words that actually appear in the SOURCE MATERIAL -- do NOT introduce vocabulary that is not present in the source. Definitions must reflect how the word is used in the source. Fill-in-blank sentences must mirror the source's topic/context." if req.source_text else ""}
+{extra_instructions}
+
+Return ONLY valid JSON. No markdown fences. No prose outside the JSON.
+
+{{
+  "vocab_words": [
+    {{"word": "actual Grade {req.grade_level} word from topic", "definition": "Grade {req.grade_level}-appropriate definition", "part_of_speech": "noun|verb|adjective|adverb"}},
+    ... EXACTLY {n} words total, all relevant to '{req.topic}', all appropriate for Grade {req.grade_level}
+  ],
+  "matching_section": {{
+    "title": "Section 1: Match the Word to Its Meaning",
+    "instructions": "Grade {req.grade_level}-appropriate matching instruction (1 sentence).",
+    "items": [
+      {{"word": "word from vocab_words", "definition": "Grade {req.grade_level}-appropriate definition"}},
+      ... all {n} words, definitions in SHUFFLED order (not matching vocab_words order)
+    ]
+  }},
+  "fill_in_blank": {{
+    "title": "Section 2: Fill in the Blank",
+    "instructions": "Grade {req.grade_level}-appropriate instruction (1 sentence).",
+    "word_bank": ["all {n} vocab words listed here"],
+    "sentences": [
+      {{"sentence": "Grade {req.grade_level} sentence with ___ blank for the answer word.", "answer": "the correct vocab word"}},
+      ... EXACTLY {n} sentences total, one for EACH vocabulary word
+    ]
+  }},
+  "sentence_writing": {{
+    "title": "Section 3: Write Your Own Sentences",
+    "instructions": "Grade {req.grade_level}-appropriate writing instruction.",
+    "prompts": [
+      {{"word": "vocab word", "hint": "{p['hint_style']}", "example": "Grade {req.grade_level}-appropriate example sentence"}},
+      ... EXACTLY {n} prompts total, one for EACH vocabulary word
+    ]
+  }}
+}}"""
+
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj)}\n\n"
+
+    def stream_gen():
+        max_attempts = 5
+        extra_instructions = ""
+        last_reason = ""
+        model_idx = 0
+
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                yield _sse({"type": "retry", "attempt": attempt, "reason": last_reason})
+
+            current_model = _TOOL_FALLBACK_MODELS[min(model_idx, len(_TOOL_FALLBACK_MODELS) - 1)]
+            yield _sse({"type": "progress", "message": f"Attempt {attempt}: calling {current_model}..."})
+
+            prompt = _build_prompt(extra_instructions)
+            collected_chunks = []
+
+            try:
+                stream = client.chat.completions.create(
+                    model=current_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=4500,
+                    stream=True,
+                )
+
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        collected_chunks.append(delta)
+                        yield _sse({"type": "token", "content": delta})
+
+            except Exception as exc:
+                last_reason = str(exc)
+                if model_idx < len(_TOOL_FALLBACK_MODELS) - 1:
+                    model_idx += 1
+                    next_model = _TOOL_FALLBACK_MODELS[model_idx]
+                    yield _sse({"type": "status", "message": f"Model error -- switching to {next_model}..."})
+                    extra_instructions = ""
+                else:
+                    extra_instructions = f"IMPORTANT: Fix the following error from the previous attempt: {last_reason}\n"
+                continue
+
+            raw = "".join(collected_chunks).strip()
+            for fence in ("```json", "```"):
+                if raw.startswith(fence):
+                    raw = raw[len(fence):]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+            raw = _re_mod.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+
+            yield _sse({"type": "status", "message": "Parsing JSON response..."})
+
+            first, last = raw.find("{"), raw.rfind("}")
+            if first != -1 and last != -1 and last > first:
+                raw = raw[first:last + 1]
+
+            data = None
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                try:
+                    from json_repair import repair_json
+                    repaired = repair_json(raw)
+                    data = json.loads(repaired)
+                except Exception:
+                    last_reason = f"Invalid JSON: {exc}"
+                    extra_instructions = (
+                        "CRITICAL: Your previous response was not valid JSON. "
+                        "Return ONLY a raw JSON object -- no markdown fences, no prose. "
+                        "Escape every double-quote inside string values as \\\". "
+                        "Do not put a comment line starting with '...' inside the JSON.\n"
+                    )
+                    continue
+
+            yield _sse({"type": "status", "message": "Validating worksheet structure..."})
+
+            validation_error = _vocab_validate(data, min_items=vocab_get_word_count(req.grade_level))
+            if validation_error:
+                last_reason = f"Validation failed: {validation_error}"
+                _n = vocab_get_word_count(req.grade_level)
+                extra_instructions = (
+                    f"IMPORTANT: Fix this validation error from your previous attempt: {validation_error}. "
+                    f"Ensure vocab_words has exactly {_n} items, matching_section has {_n} items, "
+                    f"fill_in_blank has exactly {_n} sentences, and sentence_writing has exactly {_n} prompts.\n"
+                )
+                continue
+
+            complexity_error = _vocab_check_grade_complexity(data, req.grade_level)
+            if complexity_error:
+                last_reason = f"Grade-complexity failed: {complexity_error}"
+                yield _sse({"type": "status", "message": "Words too complex for the grade -- regenerating with simpler vocabulary..."})
+                extra_instructions = complexity_error + "\n"
+                continue
+
+            yield _sse({"type": "status", "message": "Saving worksheet..."})
+
+            full_content = {
+                **data,
+                "rag_context_used": bool(rag_context),
+            }
+
+            try:
+                worksheet_id = vocab_save_worksheet(
+                    session_id=session_id,
+                    topic=req.topic,
+                    grade_level=req.grade_level,
+                    learning_objective=req.learning_objective,
+                    content=full_content,
+                )
+                vocab_save_rag_document(
+                    content=(
+                        f"vocabulary worksheet topic {req.topic} grade {req.grade_level} "
+                        f"objective {req.learning_objective} words "
+                        + " ".join(w["word"] for w in data.get("vocab_words", []))
+                    ),
+                    doc_type="worksheet",
+                    topic=req.topic,
+                    grade_level=req.grade_level,
+                )
+                vocab_rag_retriever.build_index()
+            except Exception as exc:
+                yield _sse({"type": "error", "message": f"Database error: {exc}"})
+                return
+
+            yield _sse({
+                "type": "complete",
+                "session_id": session_id,
+                "worksheet_id": worksheet_id,
+                "worksheet": full_content,
+            })
+            return
+
+        yield _sse({"type": "error", "message": f"Failed after {max_attempts} attempts. Last error: {last_reason}"})
+
+    return _SR(
+        stream_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Vocabulary Export DOCX ──
+
+@app.post("/api/vocabulary/export/docx")
+async def vocab_export_docx(payload: dict):
+    from fastapi.responses import StreamingResponse as _SR
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    ws = payload.get("worksheet", {})
+    topic = payload.get("topic", "Vocabulary")
+    grade = payload.get("grade_level", "")
+    objective = payload.get("learning_objective", "")
+
+    doc = Document()
+    title = doc.add_heading("Vocabulary Mastery Worksheet", 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Topic: {topic}  |  Grade: {grade}  |  Objective: {objective}")
+    doc.add_paragraph("Name: ____________________________   Date: _______________")
+    doc.add_paragraph()
+
+    matching = ws.get("matching_section", {})
+    if matching:
+        doc.add_heading(matching.get("title", "Section 1: Matching"), 1)
+        doc.add_paragraph(matching.get("instructions", ""))
+        doc.add_paragraph()
+        tbl = doc.add_table(rows=1, cols=2)
+        tbl.style = "Table Grid"
+        hdr = tbl.rows[0].cells
+        hdr[0].text = "Vocabulary Word"
+        hdr[1].text = "Definition"
+        for item in matching.get("items", []):
+            row = tbl.add_row().cells
+            row[0].text = item.get("word", "")
+            row[1].text = ""
+        doc.add_paragraph()
+
+    fib = ws.get("fill_in_blank", {})
+    if fib:
+        doc.add_heading(fib.get("title", "Section 2: Fill in the Blank"), 1)
+        doc.add_paragraph(fib.get("instructions", ""))
+        wb = ", ".join(fib.get("word_bank", []))
+        doc.add_paragraph(f"Word Bank: [ {wb} ]")
+        doc.add_paragraph()
+        for i, s in enumerate(fib.get("sentences", []), 1):
+            doc.add_paragraph(f"{i}. {s.get('sentence', '')}")
+        doc.add_paragraph()
+
+    sw = ws.get("sentence_writing", {})
+    if sw:
+        doc.add_heading(sw.get("title", "Section 3: Write Your Own Sentences"), 1)
+        doc.add_paragraph(sw.get("instructions", ""))
+        doc.add_paragraph()
+        for i, p in enumerate(sw.get("prompts", []), 1):
+            doc.add_paragraph(f"{i}. Word: {p.get('word', '')}")
+            doc.add_paragraph(f"   Hint: {p.get('hint', '')}")
+            doc.add_paragraph("   My sentence: _________________________________________________")
+            doc.add_paragraph()
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    return _SR(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="vocabulary_{topic}.docx"'},
+    )
+
+
+# ── Vocabulary RAG document upload ──
+
+@app.post("/api/vocabulary/rag/add-text")
+async def vocab_add_rag_text(req: VocabRAGDocRequest):
+    doc_id = vocab_save_rag_document(req.content, "knowledge", req.topic, req.grade_level)
+    vocab_rag_retriever.build_index()
+    return {"success": True, "doc_id": doc_id}
+
+@app.post("/api/vocabulary/rag/add-file")
+async def vocab_add_rag_file(request: Request, file: UploadFile = File(...)):
+    from fastapi.responses import StreamingResponse as _SR
+    await upload_limiter.check(client_ip(request))
+    raw = await read_upload_capped(file)
+    content = ""
+    if file.filename.endswith(".pdf"):
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(raw))
+        content = " ".join(p.extract_text() or "" for p in reader.pages)
+    elif file.filename.endswith(".docx"):
+        from docx import Document as DocxDoc
+        doc = DocxDoc(io.BytesIO(raw))
+        content = " ".join(p.text for p in doc.paragraphs)
+    else:
+        content = raw.decode("utf-8", errors="ignore")
+    content = (content or "").strip()
+    doc_id = vocab_save_rag_document(content[:6000], "file", file.filename, 0)
+    vocab_rag_retriever.build_index()
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "chars_indexed": len(content),
+        "text": content[:8000],
+        "filename": file.filename,
+    }
+
+
+# ── Vocabulary URL extraction ──
+
+@app.post("/api/vocabulary/extract-url")
+async def vocab_extract_url(req: dict, request: Request):
+    await extract_limiter.check(client_ip(request))
+    url = assert_public_url((req.get("url") or "").strip())
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VocabularyTool/1.0)"}) as cx:
+            r = await cx.get(url)
+            assert_public_url(str(r.url))
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            for bad in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "form", "aside"]):
+                bad.decompose()
+            title = (soup.title.string or "").strip() if soup.title else ""
+            main = soup.find("main") or soup.find("article") or soup.body or soup
+            text = _re_mod.sub(r"\s+\n", "\n", main.get_text("\n", strip=True))
+            text = _re_mod.sub(r"\n{3,}", "\n\n", text).strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="Could not extract readable text from this page.")
+        return {"success": True, "title": title, "url": url, "text": text[:8000], "chars": len(text)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"URL fetch failed: {e}")
+
+
+# ── Vocabulary YouTube extraction ──
+
+async def _vocab_youtube_metadata_fallback(video_id: str, url: str) -> dict | None:
+    import httpx
+    title = ""
+    author = ""
+    description = ""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VocabularyTool/1.0)"}) as cx:
+            r = await cx.get("https://www.youtube.com/oembed",
+                params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"})
+            if r.status_code == 200:
+                j = r.json()
+                title = (j.get("title") or "").strip()
+                author = (j.get("author_name") or "").strip()
+    except Exception:
+        pass
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VocabularyTool/1.0)"}) as cx:
+            r = await cx.get("https://noembed.com/embed",
+                params={"url": f"https://www.youtube.com/watch?v={video_id}"})
+            if r.status_code == 200:
+                j = r.json()
+                if not title:  title  = (j.get("title") or "").strip()
+                if not author: author = (j.get("author_name") or "").strip()
+                description = (j.get("description") or "").strip()
+    except Exception:
+        pass
+    try:
+        from bs4 import BeautifulSoup
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cookie": "CONSENT=YES+cb.20210328-17-p0.en+FX+000",
+            }) as cx:
+            r = await cx.get(f"https://www.youtube.com/watch?v={video_id}")
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "html.parser")
+                if not title:
+                    ot = soup.find("meta", attrs={"property": "og:title"})
+                    if ot: title = (ot.get("content") or "").strip()
+                ot_desc = soup.find("meta", attrs={"property": "og:description"})
+                if ot_desc and not description:
+                    description = (ot_desc.get("content") or "").strip()
+                for s in soup.find_all("script"):
+                    txt = s.string or ""
+                    if "shortDescription" in txt:
+                        mm = _re_mod.search(r'"shortDescription":"((?:\\.|[^"\\])*)"', txt)
+                        if mm:
+                            full = mm.group(1).encode("utf-8").decode("unicode_escape", errors="ignore")
+                            if len(full) > len(description):
+                                description = full
+                            break
+    except Exception:
+        pass
+    pieces = []
+    if title:       pieces.append(f"Video title: {title}")
+    if author:      pieces.append(f"Channel: {author}")
+    if description: pieces.append(f"\n{description}")
+    text = "\n".join(pieces).strip()
+    if not text or len(text) < 20:
+        return None
+    return {"title": title or f"YouTube video {video_id}", "text": text}
+
+@app.post("/api/vocabulary/extract-youtube")
+async def vocab_extract_youtube(req: dict, request: Request):
+    await extract_limiter.check(client_ip(request))
+    url = (req.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    m = _re_mod.search(r"(?:v=|youtu\.be/|/embed/|/shorts/)([A-Za-z0-9_-]{11})", url)
+    if not m:
+        raise HTTPException(status_code=400, detail="Could not detect a YouTube video id in that URL.")
+    video_id = m.group(1)
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        proxy_config = None
+        wh_user = os.getenv("WEBSHARE_PROXY_USERNAME")
+        wh_pass = os.getenv("WEBSHARE_PROXY_PASSWORD")
+        if wh_user and wh_pass:
+            try:
+                from youtube_transcript_api.proxies import WebshareProxyConfig
+                proxy_config = WebshareProxyConfig(proxy_username=wh_user, proxy_password=wh_pass)
+            except Exception:
+                pass
+        if proxy_config is not None:
+            transcript = YouTubeTranscriptApi(proxy_config=proxy_config).fetch(video_id)
+            text = " ".join(getattr(c, "text", "") or (c.get("text", "") if isinstance(c, dict) else "") for c in transcript).strip()
+        elif hasattr(YouTubeTranscriptApi, "get_transcript"):
+            chunks = YouTubeTranscriptApi.get_transcript(video_id)
+            text = " ".join((c.get("text", "") if isinstance(c, dict) else getattr(c, "text", "")) for c in chunks).strip()
+        else:
+            transcript = YouTubeTranscriptApi().fetch(video_id)
+            text = " ".join(getattr(c, "text", "") or (c.get("text", "") if isinstance(c, dict) else "") for c in transcript).strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="Transcript was empty.")
+        return {"success": True, "video_id": video_id, "url": url, "text": text[:8000], "chars": len(text)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e)
+        blocked = ("blocking requests" in msg.lower()
+                   or ("ip" in msg.lower() and "block" in msg.lower())
+                   or "could not retrieve a transcript" in msg.lower())
+        if blocked:
+            fallback = await _vocab_youtube_metadata_fallback(video_id, url)
+            if fallback:
+                return {
+                    "success": True, "video_id": video_id, "url": url,
+                    "text": fallback["text"][:8000], "chars": len(fallback["text"]),
+                    "title": fallback["title"],
+                    "note": "Transcript was blocked -- using title + description instead.",
+                }
+        raise HTTPException(
+            status_code=502 if blocked else 500,
+            detail=(
+                "YouTube blocks transcript requests from our server. Please paste the transcript manually."
+                if blocked else f"YouTube transcript fetch failed: {msg}"
+            ),
+        )
+
+
+# ── Vocabulary Auto-fields ──
+
+@app.post("/api/vocabulary/auto-fields")
+async def vocab_auto_fields(req: dict, request: Request):
+    await extract_limiter.check(client_ip(request))
+    source_text = (req.get("source_text") or "").strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="source_text is required.")
+    grade = req.get("grade_level")
+    grade_hint = f"Calibrate the topic + objective for Grade {grade} students. " if grade else ""
+    prompt = (
+        "You are an expert vocabulary curriculum designer.\n"
+        "Read the SOURCE MATERIAL below and propose a clean, classroom-ready\n"
+        "  * Topic (a short noun phrase, 4-10 words, naming the main idea/theme of the material)\n"
+        "  * Learning Objective (one sentence starting with 'Students will...' "
+        "describing what vocabulary skill the student will gain).\n"
+        f"{grade_hint}"
+        "Return ONLY a JSON object with keys 'topic' and 'learning_objective'. "
+        "No markdown, no prose outside the JSON.\n\n"
+        "SOURCE MATERIAL:\n---\n"
+        f"{source_text[:6000]}\n---\n\n"
+        'JSON: {"topic": "...", "learning_objective": "Students will ..."}'
+    )
+    try:
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You return strict JSON. No markdown fences."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+        )
+        raw = completion.choices[0].message.content.strip()
+        data = json.loads(raw)
+        topic = (data.get("topic") or "").strip()
+        objective = (data.get("learning_objective") or "").strip()
+        if not topic and not objective:
+            raise HTTPException(status_code=502, detail="Model returned no fields.")
+        return {"success": True, "topic": topic, "learning_objective": objective}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"auto-fields failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ─── READING COMPREHENSION TOOL ENDPOINTS ───────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Pydantic models ──
+
+class ReadingComprehensionRequest(BaseModel):
+    topic: str
+    grade_level: int
+    learning_objective: str
+    source_text: str | None = None
+    additional_context: str | None = None
+    session_id: str | None = None
+
+class ReadingSessionCreate(BaseModel):
+    metadata: dict | None = None
+
+class ReadingRAGDocRequest(BaseModel):
+    content: str
+    topic: str | None = ""
+    grade_level: int | None = 0
+
+class CompleteAnswerRequest(BaseModel):
+    question: str
+    passage_text: str
+    grade_level: int
+    word_limit: int = 35
+    question_type: str | None = "literal"
+    answer_hint: str | None = ""
+
+
+# ── Reading helper functions ──
+
+READING_GRADE_VOCAB_CAPS = {
+    1: {"max_syllables": 2, "max_chars": 7},
+    2: {"max_syllables": 3, "max_chars": 8},
+    3: {"max_syllables": 3, "max_chars": 9},
+}
+
+def _reading_count_syllables(word: str) -> int:
+    word = (word or "").lower().strip(".,!?;:'\"")
+    if not word:
+        return 1
+    count = len(_re_mod.findall(r'[aeiouy]+', word))
+    if word.endswith('e') and count > 1:
+        count -= 1
+    return max(count, 1)
+
+def _reading_check_grade_complexity(data: dict, grade_level: int) -> "str | None":
+    caps = READING_GRADE_VOCAB_CAPS.get(grade_level)
+    if not caps:
+        return None
+    vic = data.get("vocabulary_in_context", {})
+    too_complex = []
+    for item in vic.get("items", []) or []:
+        word = (item.get("word") or "").strip().lower()
+        if not word:
+            continue
+        if _reading_count_syllables(word) > caps["max_syllables"] or len(word) > caps["max_chars"]:
+            too_complex.append(word)
+    if too_complex:
+        return (
+            f"Grade {grade_level} vocabulary must be at most {caps['max_syllables']} syllables and "
+            f"{caps['max_chars']} letters per word. These words are too complex: "
+            f"{', '.join(too_complex[:5])}. REPLACE each with a simpler Grade {grade_level} word "
+            f"on the same topic (1-2 syllable sight word, CVC pattern, decodable phonics)."
+        )
+    return None
+
+def _reading_validate(data: dict, grade_level: int = 7) -> "str | None":
+    byr = data.get("before_you_read")
+    if not isinstance(byr, dict) or not isinstance(byr.get("questions"), list) or len(byr["questions"]) < 1:
+        return "before_you_read.questions is missing or empty"
+    passage = data.get("passage")
+    if not isinstance(passage, dict) or not passage.get("text"):
+        return "passage.text is missing or empty"
+    try:
+        p = READING_GRADE_PROFILES.get(grade_level, READING_GRADE_PROFILES[7])
+        rng = p.get("passage_words", "")
+        nums = [int(x) for x in _re_mod.findall(r"\d+", rng)]
+        if nums:
+            max_words = max(nums)
+            actual = len(passage["text"].split())
+            ceiling = int(max_words * 1.6)
+            if actual > ceiling:
+                return (f"passage is {actual} words but Grade {grade_level} must be "
+                        f"{rng} words. Rewrite it MUCH shorter -- no more than {max_words} words.")
+    except Exception:
+        pass
+    tdq = data.get("text_dependent_questions")
+    if not isinstance(tdq, dict) or not isinstance(tdq.get("questions"), list) or len(tdq["questions"]) < 1:
+        return "text_dependent_questions.questions is missing or empty"
+    vic = data.get("vocabulary_in_context")
+    if not isinstance(vic, dict) or not isinstance(vic.get("items"), list) or len(vic["items"]) < 1:
+        return "vocabulary_in_context.items is missing or empty"
+    return None
+
+
+# ── Reading Sessions ──
+
+@app.post("/api/reading/sessions")
+async def reading_new_session(req: ReadingSessionCreate):
+    session_id = reading_create_session(req.metadata)
+    return {"session_id": session_id}
+
+@app.get("/api/reading/sessions/{session_id}/history")
+async def reading_session_history(session_id: str):
+    return {"session_id": session_id, "history": reading_get_session_history(session_id)}
+
+@app.get("/api/reading/comprehensions")
+async def reading_list_comprehensions(limit: int = 20):
+    return {"comprehensions": reading_get_all_comprehensions(limit)}
+
+
+# ── Reading Complete Answer ──
+
+@app.post("/api/reading/complete-answer")
+async def reading_complete_answer(req: CompleteAnswerRequest):
+    p = READING_GRADE_PROFILES.get(req.grade_level, READING_GRADE_PROFILES[7])
+    grade_ctx = reading_get_grade_prompt_context(req.grade_level)
+
+    prompt = f"""You are an expert educator writing a model answer for a Grade {req.grade_level} student.
+
+{grade_ctx}
+
+READING PASSAGE:
+{req.passage_text[:2000]}
+
+QUESTION TYPE: {req.question_type}
+QUESTION: {req.question}
+
+STRICT WORD LIMIT: {req.word_limit} words maximum. Count every word -- do NOT exceed this limit.
+
+TASK: Write a model answer in EXACTLY {req.word_limit} words or fewer.
+RULES:
+1. HARD LIMIT: Your answer must be {req.word_limit} words or fewer. This is non-negotiable.
+2. Use ONLY Grade {req.grade_level} vocabulary: {p['vocab']}
+3. Sentence structure for Grade {req.grade_level}: {p['sentence']}
+4. Cognitive level: {p['blooms']}
+5. Reference the passage text as evidence but stay within the word limit.
+6. Write ONLY the answer -- no "Answer:", no labels, no explanation outside the answer.
+
+Answer ({req.word_limit} words max):"""
+
+    last_error = ""
+    for model in _TOOL_FALLBACK_MODELS:
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=min(req.word_limit * 3, 300),
+            )
+            raw_content = (response.choices[0].message.content if response.choices else None) or ""
+            answer = raw_content.strip()
+            answer = _re_mod.sub(r'^(answer|model answer|response)\s*:\s*', '', answer, flags=_re_mod.IGNORECASE).strip()
+            if not answer:
+                last_error = f"empty completion from {model}"
+                continue
+            words = answer.split()
+            if len(words) > req.word_limit:
+                answer = " ".join(words[:req.word_limit])
+                for punct in ('.', '!', '?'):
+                    last_punct = answer.rfind(punct)
+                    if last_punct > len(answer) // 2:
+                        answer = answer[:last_punct + 1]
+                        break
+            return {"answer": answer}
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+
+    raise HTTPException(status_code=503, detail=f"Failed after {len(_TOOL_FALLBACK_MODELS)} attempts: {last_error}")
+
+
+# ── Reading Generate (SSE streaming) ──
+
+@app.post("/api/reading/generate")
+async def reading_generate_comprehension(req: ReadingComprehensionRequest, request: Request):
+    from fastapi.responses import StreamingResponse as _SR
+
+    await generate_limiter.check(client_ip(request))
+    session_id = req.session_id or reading_create_session()
+
+    grade_ctx = reading_get_grade_prompt_context(req.grade_level)
+
+    source_block = (
+        "\nSOURCE MATERIAL (MANDATORY -- base the passage's facts, names, examples and "
+        "vocabulary on THIS content only; do not invent facts that contradict it):\n"
+        f"---\n{req.source_text[:6000]}\n---\n"
+    ) if req.source_text else ""
+    additional_block = f"Additional Context: {req.additional_context}" if req.additional_context else ""
+    rag_block = ""
+    ctx_block = f"{source_block}{additional_block}\n{rag_block}".strip()
+
+    def _build_prompt(extra_instructions: str = "") -> str:
+        p = READING_GRADE_PROFILES.get(req.grade_level, READING_GRADE_PROFILES[7])
+        word_range = p["passage_words"]
+        c = get_reading_counts(req.grade_level)
+
+        low_grade_block = f"\n- Passage must be {word_range} words.\n"
+
+        return f"""You are an expert reading specialist and curriculum designer.
+Your task is to create a complete, grade-calibrated Reading Comprehension activity.
+
+{grade_ctx}
+{low_grade_block}
+CONTENT DETAILS:
+Topic: {req.topic}
+Learning Objective: {req.learning_objective}
+{ctx_block}
+
+CRITICAL RULES:
+1. Every word you write -- passage, questions, instructions, hints -- must match Grade {req.grade_level} level EXACTLY.
+2. The passage MUST be {word_range} words -- count carefully.
+3. Generate EXACTLY {c['total_q']} text-dependent questions (calibrated for Grade {req.grade_level} attention) and EXACTLY {c['vocab']} vocabulary items. Do NOT write all literal questions.
+4. Vocabulary in Context words must come directly from the passage.
+5. Before You Read questions must activate prior knowledge at a Grade {req.grade_level} cognitive level.
+{"6. SOURCE MATERIAL is provided above and is the AUTHORITATIVE basis for this passage. The passage MUST be a grade-level rewrite/summary of the SOURCE MATERIAL -- every fact, name, number, date, event, term and example must come directly from it. Do NOT invent content from your own knowledge if it contradicts or is absent from the source. Text-dependent questions must reference the rewritten passage (which reflects the source); Vocabulary in Context words must be picked from words actually present in the source." if req.source_text else ""}
+{extra_instructions}
+
+Return ONLY valid JSON. No markdown fences. No prose outside the JSON.
+
+{{
+  "before_you_read": {{
+    "title": "Before You Read",
+    "instructions": "Grade {req.grade_level}-appropriate activation prompt here (1 sentence).",
+    "questions": [
+      {{"number": 1, "question": "Grade {req.grade_level} prior-knowledge question about {req.topic}", "type": "activation"}},
+      {{"number": 2, "question": "Grade {req.grade_level} prediction question about the passage", "type": "prediction"}},
+      {{"number": 3, "question": "Grade {req.grade_level} inquiry question the student wonders about {req.topic}", "type": "inquiry"}}
+    ]
+  }},
+  "annotation_guide": {{
+    "title": "Annotation Guide",
+    "instructions": "Grade {req.grade_level}-appropriate reading strategy instruction (1 sentence).",
+    "symbols": [
+      {{"symbol": "star", "meaning": "Grade {req.grade_level} explanation of main idea marking"}},
+      {{"symbol": "?", "meaning": "Grade {req.grade_level} explanation of confusion marking"}},
+      {{"symbol": "!", "meaning": "Grade {req.grade_level} explanation of interesting info marking"}},
+      {{"symbol": "->", "meaning": "Grade {req.grade_level} explanation of cause-effect marking"}},
+      {{"symbol": "circle", "meaning": "Grade {req.grade_level} explanation of vocabulary marking"}}
+    ]
+  }},
+  "passage": {{
+    "title": "Engaging title relevant to {req.topic}",
+    "text": "Write the FULL passage here. Must be {word_range} words. Use paragraph breaks (\\n\\n). Every sentence must match Grade {req.grade_level} syntax and vocabulary.",
+    "word_count": "actual number of words in the passage you wrote"
+  }},
+  "text_dependent_questions": {{
+    "title": "Text-Dependent Questions",
+    "instructions": "Grade {req.grade_level}-appropriate instruction for answering with text evidence.",
+    "questions": [
+      {{"number": 1, "question": "Question at Grade {req.grade_level} level", "type": "literal", "answer_hint": "Paragraph evidence"}},
+      ... Generate EXACTLY {c['total_q']} questions total for Grade {req.grade_level}:
+          {c['literal']} literal (type "literal"), {c['inferential']} inferential (type "inferential"){', ' + str(c['higher']) + ' higher-order Analyze/Evaluate (type "critical_thinking")' if c['higher'] else ''}.
+          Number them 1..{c['total_q']}. Each needs an answer_hint pointing to passage evidence.
+    ]
+  }},
+  "vocabulary_in_context": {{
+    "title": "Vocabulary in Context",
+    "instructions": "Grade {req.grade_level}-appropriate vocabulary strategy instruction.",
+    "items": [
+      {{
+        "word": "actual word from the passage appropriate for Grade {req.grade_level}",
+        "sentence_from_passage": "Copy the exact sentence from your passage containing this word.",
+        "context_clue_type": "definition|example|contrast|inference",
+        "activity": "Grade {req.grade_level}-appropriate activity using this word",
+        "answer": "Grade {req.grade_level}-appropriate answer"
+      }},
+      ... EXACTLY {c['vocab']} items total, each word from the passage
+    ]
+  }}
+}}"""
+
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj)}\n\n"
+
+    def stream_gen():
+        max_attempts = 5
+        extra_instructions = ""
+        last_reason = ""
+        model_idx = 0
+
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                yield _sse({"type": "retry", "attempt": attempt, "reason": last_reason})
+
+            current_model = _TOOL_FALLBACK_MODELS[min(model_idx, len(_TOOL_FALLBACK_MODELS) - 1)]
+            yield _sse({"type": "progress", "message": f"Attempt {attempt}: calling {current_model}..."})
+
+            prompt = _build_prompt(extra_instructions)
+            collected_chunks = []
+
+            try:
+                stream = client.chat.completions.create(
+                    model=current_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.75,
+                    max_tokens=4500,
+                    stream=True,
+                )
+
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        collected_chunks.append(delta)
+                        yield _sse({"type": "token", "content": delta})
+
+            except Exception as exc:
+                last_reason = str(exc)
+                if model_idx < len(_TOOL_FALLBACK_MODELS) - 1:
+                    model_idx += 1
+                    next_model = _TOOL_FALLBACK_MODELS[model_idx]
+                    yield _sse({"type": "status", "message": f"Model error -- switching to {next_model}..."})
+                    extra_instructions = ""
+                else:
+                    extra_instructions = f"IMPORTANT: Fix the following error from the previous attempt: {last_reason}\n"
+                continue
+
+            raw = "".join(collected_chunks).strip()
+            for fence in ("```json", "```"):
+                if raw.startswith(fence):
+                    raw = raw[len(fence):]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+            raw = _re_mod.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+
+            yield _sse({"type": "status", "message": "Parsing JSON response..."})
+
+            first, last = raw.find("{"), raw.rfind("}")
+            if first != -1 and last != -1 and last > first:
+                raw = raw[first:last + 1]
+
+            data = None
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                try:
+                    from json_repair import repair_json
+                    repaired = repair_json(raw)
+                    data = json.loads(repaired)
+                except Exception:
+                    last_reason = f"Invalid JSON: {exc}"
+                    extra_instructions = (
+                        "CRITICAL: Your previous response was not valid JSON. "
+                        "Return ONLY a raw JSON object -- no markdown fences, no prose. "
+                        "Escape every double-quote inside string values as \\\".\n"
+                    )
+                    if model_idx < len(_TOOL_FALLBACK_MODELS) - 1:
+                        model_idx += 1
+                        yield _sse({"type": "status", "message": f"Switching to {_TOOL_FALLBACK_MODELS[model_idx]}..."})
+                    continue
+
+            yield _sse({"type": "status", "message": "Validating comprehension structure..."})
+
+            validation_error = _reading_validate(data, req.grade_level)
+            if validation_error:
+                last_reason = f"Validation failed: {validation_error}"
+                extra_instructions = (
+                    f"IMPORTANT: Fix this validation error from your previous attempt: {validation_error}. "
+                    "Ensure before_you_read has >=3 questions, passage.text is present, "
+                    f"passage is {READING_GRADE_PROFILES.get(req.grade_level, READING_GRADE_PROFILES[7])['passage_words']} words, "
+                    "text_dependent_questions has >=6 questions, and vocabulary_in_context has >=5 items.\n"
+                )
+                if model_idx < len(_TOOL_FALLBACK_MODELS) - 1:
+                    model_idx += 1
+                    yield _sse({"type": "status", "message": f"Switching to {_TOOL_FALLBACK_MODELS[model_idx]}..."})
+                continue
+
+            complexity_error = _reading_check_grade_complexity(data, req.grade_level)
+            if complexity_error:
+                last_reason = f"Grade-complexity failed: {complexity_error}"
+                yield _sse({"type": "status", "message": "Words too complex for the grade -- regenerating with simpler vocabulary..."})
+                extra_instructions = complexity_error + "\n"
+                continue
+
+            # Annotate passage with readability metrics
+            passage_text = data.get("passage", {}).get("text", "")
+            readability = reading_analyze_text_grade(passage_text)
+            if readability:
+                data["passage"]["readability"] = readability
+                word_count = readability.get("word_count", 0)
+                if word_count:
+                    data["passage"]["word_count"] = word_count
+
+            yield _sse({"type": "status", "message": "Saving comprehension..."})
+
+            full_content = {**data, "rag_context_used": False}
+
+            try:
+                comp_id = reading_save_comprehension(
+                    session_id=session_id,
+                    topic=req.topic,
+                    grade_level=req.grade_level,
+                    learning_objective=req.learning_objective,
+                    content=full_content,
+                )
+                reading_save_rag_document(
+                    content=(
+                        f"reading comprehension topic {req.topic} grade {req.grade_level} "
+                        f"objective {req.learning_objective} passage: {passage_text[:300]}"
+                    ),
+                    doc_type="comprehension",
+                    topic=req.topic,
+                    grade_level=req.grade_level,
+                )
+            except Exception as exc:
+                yield _sse({"type": "error", "message": f"Database error: {exc}"})
+                return
+
+            yield _sse({
+                "type": "complete",
+                "session_id": session_id,
+                "comprehension_id": comp_id,
+                "comprehension": full_content,
+            })
+            return
+
+        yield _sse({"type": "error", "message": f"Failed after {max_attempts} attempts. Last error: {last_reason}"})
+
+    return _SR(
+        stream_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Reading Export DOCX ──
+
+@app.post("/api/reading/export/docx")
+async def reading_export_docx(payload: dict):
+    from fastapi.responses import StreamingResponse as _SR
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    comp = payload.get("comprehension", {})
+    topic = payload.get("topic", "Reading")
+    grade = payload.get("grade_level", "")
+    objective = payload.get("learning_objective", "")
+
+    doc = Document()
+    title = doc.add_heading("Reading Comprehension Activity", 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Topic: {topic}  |  Grade: {grade}  |  Objective: {objective}")
+    doc.add_paragraph("Name: ____________________________   Date: _______________")
+    doc.add_paragraph()
+
+    byr = comp.get("before_you_read", {})
+    if byr:
+        doc.add_heading(byr.get("title", "Before You Read"), 1)
+        doc.add_paragraph(byr.get("instructions", ""))
+        for i, q in enumerate(byr.get("questions", []), 1):
+            num = q.get("number", i)
+            doc.add_paragraph(f"{num}. {q.get('question', '')}")
+            doc.add_paragraph("   Answer: ____________________________________________")
+        doc.add_paragraph()
+
+    ag = comp.get("annotation_guide", {})
+    if ag:
+        doc.add_heading(ag.get("title", "Annotation Guide"), 1)
+        doc.add_paragraph(ag.get("instructions", ""))
+        for s in ag.get("symbols", []):
+            doc.add_paragraph(f"  {s.get('symbol', '')} = {s.get('meaning', '')}")
+        doc.add_paragraph()
+
+    passage = comp.get("passage", {})
+    if passage:
+        doc.add_heading(passage.get("title", "Reading Passage"), 1)
+        for para in passage.get("text", "").split("\n\n"):
+            if para.strip():
+                doc.add_paragraph(para.strip())
+        doc.add_paragraph()
+
+    tdq = comp.get("text_dependent_questions", {})
+    if tdq:
+        doc.add_heading(tdq.get("title", "Text-Dependent Questions"), 1)
+        doc.add_paragraph(tdq.get("instructions", ""))
+        for i, q in enumerate(tdq.get("questions", []), 1):
+            num = q.get("number", i)
+            doc.add_paragraph(f"{num}. {q.get('question', '')}")
+            doc.add_paragraph("   Answer: ____________________________________________")
+            doc.add_paragraph("   ____________________________________________________")
+        doc.add_paragraph()
+
+    vic = comp.get("vocabulary_in_context", {})
+    if vic:
+        doc.add_heading(vic.get("title", "Vocabulary in Context"), 1)
+        doc.add_paragraph(vic.get("instructions", ""))
+        for i, item in enumerate(vic.get("items", []), 1):
+            doc.add_paragraph(f"{i}. Word: \"{item.get('word', '')}\"")
+            doc.add_paragraph(f"   From the text: \"{item.get('sentence_from_passage', '')}\"")
+            doc.add_paragraph(f"   {item.get('activity', '')}")
+            doc.add_paragraph("   My answer: _________________________________________")
+            doc.add_paragraph()
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    return _SR(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="reading_{topic}.docx"'},
+    )
+
+
+# ── Reading RAG document upload ──
+
+@app.post("/api/reading/rag/add-text")
+async def reading_add_rag_text(req: ReadingRAGDocRequest):
+    doc_id = reading_save_rag_document(req.content, "knowledge", req.topic, req.grade_level)
+    return {"success": True, "doc_id": doc_id}
+
+@app.post("/api/reading/rag/add-file")
+async def reading_add_rag_file(request: Request, file: UploadFile = File(...)):
+    await upload_limiter.check(client_ip(request))
+    raw = await read_upload_capped(file)
+    content = ""
+    if file.filename.endswith(".pdf"):
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(raw))
+        content = " ".join(p.extract_text() or "" for p in reader.pages)
+    elif file.filename.endswith(".docx"):
+        from docx import Document as DocxDoc
+        doc = DocxDoc(io.BytesIO(raw))
+        content = " ".join(p.text for p in doc.paragraphs)
+    else:
+        content = raw.decode("utf-8", errors="ignore")
+    content = (content or "").strip()
+    doc_id = reading_save_rag_document(content[:6000], "file", file.filename, 0)
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "chars_indexed": len(content),
+        "text": content[:8000],
+        "filename": file.filename,
+    }
+
+
+# ── Reading URL extraction ──
+
+@app.post("/api/reading/extract-url")
+async def reading_extract_url(req: dict, request: Request):
+    await extract_limiter.check(client_ip(request))
+    url = assert_public_url((req.get("url") or "").strip())
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ReadingTool/1.0)"}) as cx:
+            r = await cx.get(url)
+            assert_public_url(str(r.url))
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            for bad in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "form", "aside"]):
+                bad.decompose()
+            title = (soup.title.string or "").strip() if soup.title else ""
+            main = soup.find("main") or soup.find("article") or soup.body or soup
+            text = _re_mod.sub(r"\s+\n", "\n", main.get_text("\n", strip=True))
+            text = _re_mod.sub(r"\n{3,}", "\n\n", text).strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="Could not extract readable text from this page.")
+        return {"success": True, "title": title, "url": url, "text": text[:8000], "chars": len(text)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"URL fetch failed: {e}")
+
+
+# ── Reading YouTube extraction ──
+
+async def _reading_youtube_metadata_fallback(video_id: str, url: str) -> dict | None:
+    import httpx
+    title = ""
+    author = ""
+    description = ""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ReadingTool/1.0)"}) as cx:
+            r = await cx.get("https://www.youtube.com/oembed",
+                params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"})
+            if r.status_code == 200:
+                j = r.json()
+                title = (j.get("title") or "").strip()
+                author = (j.get("author_name") or "").strip()
+    except Exception:
+        pass
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ReadingTool/1.0)"}) as cx:
+            r = await cx.get("https://noembed.com/embed",
+                params={"url": f"https://www.youtube.com/watch?v={video_id}"})
+            if r.status_code == 200:
+                j = r.json()
+                if not title:  title  = (j.get("title") or "").strip()
+                if not author: author = (j.get("author_name") or "").strip()
+                description = (j.get("description") or "").strip()
+    except Exception:
+        pass
+    try:
+        from bs4 import BeautifulSoup
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cookie": "CONSENT=YES+cb.20210328-17-p0.en+FX+000",
+            }) as cx:
+            r = await cx.get(f"https://www.youtube.com/watch?v={video_id}")
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "html.parser")
+                if not title:
+                    ot = soup.find("meta", attrs={"property": "og:title"})
+                    if ot: title = (ot.get("content") or "").strip()
+                ot_desc = soup.find("meta", attrs={"property": "og:description"})
+                if ot_desc and not description:
+                    description = (ot_desc.get("content") or "").strip()
+                for s in soup.find_all("script"):
+                    txt = s.string or ""
+                    if "shortDescription" in txt:
+                        mm = _re_mod.search(r'"shortDescription":"((?:\\.|[^"\\])*)"', txt)
+                        if mm:
+                            full = mm.group(1).encode("utf-8").decode("unicode_escape", errors="ignore")
+                            if len(full) > len(description):
+                                description = full
+                            break
+    except Exception:
+        pass
+    pieces = []
+    if title:       pieces.append(f"Video title: {title}")
+    if author:      pieces.append(f"Channel: {author}")
+    if description: pieces.append(f"\n{description}")
+    text = "\n".join(pieces).strip()
+    if not text or len(text) < 20:
+        return None
+    return {"title": title or f"YouTube video {video_id}", "text": text}
+
+@app.post("/api/reading/extract-youtube")
+async def reading_extract_youtube(req: dict, request: Request):
+    await extract_limiter.check(client_ip(request))
+    url = (req.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    m = _re_mod.search(r"(?:v=|youtu\.be/|/embed/|/shorts/)([A-Za-z0-9_-]{11})", url)
+    if not m:
+        raise HTTPException(status_code=400, detail="Could not detect a YouTube video id in that URL.")
+    video_id = m.group(1)
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        proxy_config = None
+        wh_user = os.getenv("WEBSHARE_PROXY_USERNAME")
+        wh_pass = os.getenv("WEBSHARE_PROXY_PASSWORD")
+        if wh_user and wh_pass:
+            try:
+                from youtube_transcript_api.proxies import WebshareProxyConfig
+                proxy_config = WebshareProxyConfig(proxy_username=wh_user, proxy_password=wh_pass)
+            except Exception:
+                pass
+        if proxy_config is not None:
+            transcript = YouTubeTranscriptApi(proxy_config=proxy_config).fetch(video_id)
+            text = " ".join(getattr(c, "text", "") or (c.get("text", "") if isinstance(c, dict) else "") for c in transcript).strip()
+        elif hasattr(YouTubeTranscriptApi, "get_transcript"):
+            chunks = YouTubeTranscriptApi.get_transcript(video_id)
+            text = " ".join((c.get("text", "") if isinstance(c, dict) else getattr(c, "text", "")) for c in chunks).strip()
+        else:
+            transcript = YouTubeTranscriptApi().fetch(video_id)
+            text = " ".join(getattr(c, "text", "") or (c.get("text", "") if isinstance(c, dict) else "") for c in transcript).strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="Transcript was empty.")
+        return {"success": True, "video_id": video_id, "url": url, "text": text[:8000], "chars": len(text)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e)
+        blocked = ("blocking requests" in msg.lower()
+                   or ("ip" in msg.lower() and "block" in msg.lower())
+                   or "could not retrieve a transcript" in msg.lower())
+        if blocked:
+            fallback = await _reading_youtube_metadata_fallback(video_id, url)
+            if fallback:
+                return {
+                    "success": True, "video_id": video_id, "url": url,
+                    "text": fallback["text"][:8000], "chars": len(fallback["text"]),
+                    "title": fallback["title"],
+                    "note": "Transcript was blocked -- using title + description instead.",
+                }
+        raise HTTPException(
+            status_code=502 if blocked else 500,
+            detail=(
+                "YouTube blocks transcript requests from our server. Please paste the transcript manually."
+                if blocked else f"YouTube transcript fetch failed: {msg}"
+            ),
+        )
+
+
+# ── Reading Auto-fields ──
+
+@app.post("/api/reading/auto-fields")
+async def reading_auto_fields(req: dict, request: Request):
+    await extract_limiter.check(client_ip(request))
+    source_text = (req.get("source_text") or "").strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="source_text is required.")
+    grade = req.get("grade_level")
+    grade_hint = f"Calibrate the topic + objective for Grade {grade} students. " if grade else ""
+    prompt = (
+        "You are an expert reading-comprehension curriculum designer.\n"
+        "Read the SOURCE MATERIAL below and propose a clean, classroom-ready\n"
+        "  * Topic (a short noun phrase, 4-10 words, naming the main idea)\n"
+        "  * Learning Objective (one sentence starting with 'Students will...' "
+        "describing what the student will be able to do after reading).\n"
+        f"{grade_hint}"
+        "Return ONLY a JSON object with keys 'topic' and 'learning_objective'. "
+        "No markdown, no prose outside the JSON.\n\n"
+        "SOURCE MATERIAL:\n---\n"
+        f"{source_text[:6000]}\n---\n\n"
+        'JSON: {"topic": "...", "learning_objective": "Students will ..."}'
+    )
+    try:
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You return strict JSON. No markdown fences."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+        )
+        raw = completion.choices[0].message.content.strip()
+        data = json.loads(raw)
+        topic = (data.get("topic") or "").strip()
+        objective = (data.get("learning_objective") or "").strip()
+        if not topic and not objective:
+            raise HTTPException(status_code=502, detail="Model returned no fields.")
+        return {"success": True, "topic": topic, "learning_objective": objective}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"auto-fields failed: {e}")
 
 
 # ─── SERVE FRONTEND ────────────────────────────────────

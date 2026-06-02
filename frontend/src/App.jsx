@@ -13,6 +13,8 @@ import QuestionPaperGenerator from './pages/QuestionPaperGenerator'
 import ClassActivityGenerator from './pages/ClassActivityGenerator'
 import CodeDebugger from './pages/CodeDebugger'
 import FeedbackSummarizer from './pages/FeedbackSummarizer'
+import VocabularyMastery from './pages/VocabularyMastery'
+import ReadingComprehension from './pages/ReadingComprehension'
 
 function ProtectedLayout() {
   const { user, loading } = useAuth()
@@ -69,6 +71,8 @@ export default function App() {
           <Route path="/question-paper" element={<QuestionPaperGenerator />} />
           <Route path="/code-debugger" element={<CodeDebugger />} />
           <Route path="/feedback" element={<FeedbackSummarizer />} />
+          <Route path="/vocabulary" element={<VocabularyMastery />} />
+          <Route path="/comprehension" element={<ReadingComprehension />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" />} />
