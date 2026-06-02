@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { useAuth } from '../context/AuthContext'
 import VocabFormPage from './vocabulary/VocabFormPage'
 import VocabResultPage from './vocabulary/VocabResultPage'
 
@@ -18,6 +19,7 @@ const BLOCKED_REGEX = new RegExp('\\b(?:' + BLOCKED_PATTERNS.join('|') + ')\\b',
 const containsBlockedContent = (text = '') => BLOCKED_REGEX.test(text)
 
 export default function VocabularyMastery() {
+  const { teacherId } = useAuth()
   const [view, setView] = useState('form')
   const [sessionId, setSessionId] = useState(null)
   const [worksheet, setWorksheet] = useState(null)
@@ -59,6 +61,20 @@ export default function VocabularyMastery() {
     setStreamStatus('')
     setFormData(data)
     try {
+      try {
+        const usageRes = await fetch(`${API}/api/increment-usage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teacher_id: teacherId, tool_name: 'vocabulary' })
+        })
+        const usageData = await usageRes.json()
+        if (usageData.exceeded) {
+          setError(usageData.error || 'Daily limit exceeded. Try again tomorrow.')
+          setLoading(false)
+          return
+        }
+      } catch (e) { console.error('Usage check failed:', e) }
+
       const sid = await ensureSession()
       const res = await fetch(`${API}/api/vocabulary/generate`, {
         method: 'POST',
@@ -97,6 +113,20 @@ export default function VocabularyMastery() {
               return [...prev, { label, id: evt.worksheet_id }]
             })
             setView('result')
+            try {
+              fetch(`${API}/api/save-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  teacher_id: teacherId, tool_name: 'vocabulary',
+                  topic: data.topic, grade_level: data.grade_level,
+                  subject: 'Vocabulary',
+                  request_data: data,
+                  response_preview: `Vocabulary worksheet: ${data.topic} (Grade ${data.grade_level})`,
+                  response_content: JSON.stringify(evt.worksheet),
+                })
+              })
+            } catch {}
           } else if (evt.type === 'error') {
             throw new Error(evt.message)
           }
@@ -111,7 +141,7 @@ export default function VocabularyMastery() {
   }
 
   return (
-    <div style={{ margin: 'calc(-1 * var(--header-h, 0px)) 0 0 0', minHeight: 'calc(100vh - var(--header-h, 0px))' }}>
+    <div style={{ margin: '-24px -28px 0', minHeight: 'calc(100vh - var(--header-h))' }}>
       {view === 'form' && (
         <VocabFormPage
           onGenerate={handleGenerate}
@@ -119,6 +149,7 @@ export default function VocabularyMastery() {
           loading={loading}
           error={error}
           prefillData={prefillData}
+          streamStatus={streamStatus}
         />
       )}
       {view === 'result' && worksheet && (

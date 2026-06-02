@@ -52,7 +52,7 @@ function checkContent(text) {
   return null
 }
 
-export default function FormPage({ onGenerate, onBack, loading, error, prefillData }) {
+export default function FormPage({ onGenerate, onBack, loading, error, prefillData, streamStatus }) {
   const [objective, setObjective] = useState(prefillData?.learning_objective || '')
   const [topic, setTopic] = useState(prefillData?.topic || '')
   const [grade, setGrade] = useState(gradeToLabel(prefillData?.grade_level))
@@ -597,7 +597,7 @@ export default function FormPage({ onGenerate, onBack, loading, error, prefillDa
       </div>
 
       {/* Sticky bottom */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-4">
+      <div className="fixed bottom-0 right-0 bg-white border-t border-gray-200 px-6 py-4" style={{ left: 'var(--sidebar-w)' }}>
         <div className="max-w-2xl mx-auto">
           {/* Source-loaded indicator: visible right above Generate so teacher knows the uploaded doc / URL will be used */}
           {sourceLabel && !fileStatus.startsWith('Uploading') && !fileStatus.startsWith('Fetching') && (
@@ -628,8 +628,8 @@ export default function FormPage({ onGenerate, onBack, loading, error, prefillDa
             >
               {loading ? (
                 <>
-                  <div className="spinner" />
-                  Generating...
+                  <div style={{ width: 18, height: 18, border: '2px solid #fff4', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
+                  {streamStatus || 'Generating...'}
                 </>
               ) : fileStatus.startsWith('Uploading') || fileStatus.startsWith('Fetching') ? (
                 <>Waiting for source… </>

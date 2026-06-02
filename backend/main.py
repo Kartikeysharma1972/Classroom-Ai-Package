@@ -92,10 +92,11 @@ try:
 except ImportError:
     RAG_AVAILABLE = False
 
+_CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5176,http://localhost:5173,http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1435,7 +1436,7 @@ async def generate_adaptive_question(data: dict):
         Include 4 multiple choice options and mark the correct answer."""
 
         response = client.chat.completions.create(
-            model="gpt-4",
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": "You are an expert educator. Generate a clear, engaging educational question."},
                 {"role": "user", "content": prompt}

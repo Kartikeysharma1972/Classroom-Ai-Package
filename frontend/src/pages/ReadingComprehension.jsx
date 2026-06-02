@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { useAuth } from '../context/AuthContext'
 import CompFormPage from './comprehension/CompFormPage'
 import CompResultPage from './comprehension/CompResultPage'
 
@@ -18,6 +19,7 @@ const BLOCKED_REGEX = new RegExp('\\b(?:' + BLOCKED_PATTERNS.join('|') + ')\\b',
 const containsBlockedContent = (text = '') => BLOCKED_REGEX.test(text)
 
 export default function ReadingComprehension() {
+  const { teacherId } = useAuth()
   const [view, setView] = useState('form')
   const [sessionId, setSessionId] = useState(null)
   const [comprehension, setComprehension] = useState(null)
@@ -59,6 +61,20 @@ export default function ReadingComprehension() {
     setStreamStatus('')
     setFormData(data)
     try {
+      try {
+        const usageRes = await fetch(`${API}/api/increment-usage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teacher_id: teacherId, tool_name: 'comprehension' })
+        })
+        const usageData = await usageRes.json()
+        if (usageData.exceeded) {
+          setError(usageData.error || 'Daily limit exceeded. Try again tomorrow.')
+          setLoading(false)
+          return
+        }
+      } catch (e) { console.error('Usage check failed:', e) }
+
       const sid = await ensureSession()
       const res = await fetch(`${API}/api/reading/generate`, {
         method: 'POST',
@@ -97,6 +113,20 @@ export default function ReadingComprehension() {
               return [...prev, { label, id: evt.comprehension_id }]
             })
             setView('result')
+            try {
+              fetch(`${API}/api/save-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  teacher_id: teacherId, tool_name: 'comprehension',
+                  topic: data.topic, grade_level: data.grade_level,
+                  subject: 'Reading Comprehension',
+                  request_data: data,
+                  response_preview: `Reading comprehension: ${data.topic} (Grade ${data.grade_level})`,
+                  response_content: JSON.stringify(evt.comprehension),
+                })
+              })
+            } catch {}
           } else if (evt.type === 'error') {
             throw new Error(evt.message)
           }
@@ -111,7 +141,7 @@ export default function ReadingComprehension() {
   }
 
   return (
-    <div style={{ margin: 'calc(-1 * var(--header-h, 0px)) 0 0 0', minHeight: 'calc(100vh - var(--header-h, 0px))' }}>
+    <div style={{ margin: '-24px -28px 0', minHeight: 'calc(100vh - var(--header-h))' }}>
       {view === 'form' && (
         <CompFormPage
           onGenerate={handleGenerate}
@@ -119,6 +149,7 @@ export default function ReadingComprehension() {
           loading={loading}
           error={error}
           prefillData={prefillData}
+          streamStatus={streamStatus}
         />
       )}
       {view === 'result' && comprehension && (

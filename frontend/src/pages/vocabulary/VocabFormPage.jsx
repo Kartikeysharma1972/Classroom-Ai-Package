@@ -6,6 +6,26 @@ const GRADE_LEVELS = [
   '9th Grade Students', '10th Grade Students', '11th Grade Students', '12th Grade Students'
 ]
 
+const GRADE_MAP = {
+  '1st Grade Students': 1, '2nd Grade Students': 2,
+  '3rd Grade Students': 3, '4th Grade Students': 4, '5th Grade Students': 5,
+  '6th Grade Students': 6, '7th Grade Students': 7, '8th Grade Students': 8,
+  '9th Grade Students': 9, '10th Grade Students': 10, '11th Grade Students': 11, '12th Grade Students': 12
+}
+
+function resolveGradeNum(g) {
+  if (typeof g === 'number' && g >= 1 && g <= 12) return g
+  if (GRADE_MAP[g]) return GRADE_MAP[g]
+  const m = String(g || '').match(/\d+/)
+  const n = m ? parseInt(m[0], 10) : null
+  return n && n >= 1 && n <= 12 ? n : null
+}
+
+function gradeToLabel(g) {
+  const n = resolveGradeNum(g)
+  return n ? GRADE_LEVELS[n - 1] : ''
+}
+
 const CONTENT_FLAGS = [
   { pattern: /https?:\/\//i,                                   label: 'URLs or links' },
   { pattern: /www\.[a-z]/i,                                    label: 'URLs or links' },
@@ -29,10 +49,10 @@ function checkContent(text) {
   return null
 }
 
-export default function FormPage({ onGenerate, onBack, loading, error, prefillData }) {
+export default function FormPage({ onGenerate, onBack, loading, error, prefillData, streamStatus }) {
   const [objective, setObjective] = useState(prefillData?.learning_objective || '')
   const [topic, setTopic] = useState(prefillData?.topic || '')
-  const [grade, setGrade] = useState(prefillData?.grade_level || '')
+  const [grade, setGrade] = useState(gradeToLabel(prefillData?.grade_level))
   const [activeTab, setActiveTab] = useState(null)
   const [additionalContext, setAdditionalContext] = useState('')
   const [websiteUrl, setWebsiteUrl] = useState('')
@@ -259,7 +279,7 @@ export default function FormPage({ onGenerate, onBack, loading, error, prefillDa
     if (!text || text.trim().length < 30) return
     setFileStatus(prev => (prev ? prev + ' · ' : '') + '✨ AI is suggesting Topic + Objective…')
     try {
-      const gradeNum = parseInt(grade, 10) || undefined
+      const gradeNum = resolveGradeNum(grade) || undefined
       const res = await fetch('/api/vocabulary/auto-fields', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source_text: text, grade_level: gradeNum }),
@@ -286,8 +306,8 @@ export default function FormPage({ onGenerate, onBack, loading, error, prefillDa
       showBlocked(flagged)
       return
     }
-    const gradeNum = parseInt(grade, 10)
-    if (!gradeNum || gradeNum < 1 || gradeNum > 12) {
+    const gradeNum = resolveGradeNum(grade)
+    if (!gradeNum) {
       showBlocked('Please select a Reading Level (grade) before generating.')
       return
     }
@@ -563,7 +583,7 @@ export default function FormPage({ onGenerate, onBack, loading, error, prefillDa
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-4">
+      <div className="fixed bottom-0 right-0 bg-white border-t border-gray-200 px-6 py-4" style={{ left: 'var(--sidebar-w)' }}>
         <div className="max-w-2xl mx-auto">
           {sourceLabel && !fileStatus.startsWith('Uploading') && !fileStatus.startsWith('Fetching') && (
             <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
@@ -593,8 +613,8 @@ export default function FormPage({ onGenerate, onBack, loading, error, prefillDa
             >
               {loading ? (
                 <>
-                  <div className="spinner" />
-                  Generating...
+                  <div style={{ width: 18, height: 18, border: '2px solid #fff4', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
+                  {streamStatus || 'Generating...'}
                 </>
               ) : fileStatus.startsWith('Uploading') || fileStatus.startsWith('Fetching') ? (
                 <>Waiting for source… </>

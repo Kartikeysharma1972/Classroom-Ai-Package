@@ -163,9 +163,9 @@ export default function ResultPage({ worksheet, formData, tabs, onNewTab, onClos
         document.execCommand('copy')
         document.body.removeChild(ta)
       }
-      setToast({ type: 'success', message: 'Copied to clipboard' })
+      showToast('Copied to clipboard')
     } catch (e) {
-      setToast({ type: 'error', message: 'Copy failed — please select and copy manually' })
+      showToast('Copy failed — please select and copy manually')
     }
   }
 
@@ -204,7 +204,7 @@ export default function ResultPage({ worksheet, formData, tabs, onNewTab, onClos
   const handleGoogleDrive = () => alert('Connect Google Drive coming soon!')
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: '#FAF9F7' }}>
+    <div className="flex flex-col" style={{ background: '#FAF9F7', height: 'calc(100vh - var(--header-h))' }}>
 
       {/* Top bar with tabs + export */}
       <div className="bg-white border-b border-gray-200 flex items-center px-4 gap-2" style={{ minHeight: 44 }}>

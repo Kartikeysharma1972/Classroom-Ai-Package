@@ -16,6 +16,7 @@ import HistoryPopup from '../../components/comprehension/HistoryPopup'
 const sanitizeHTML = (html) => DOMPurify.sanitize(html || '', { USE_PROFILES: { html: true } })
 
 export default function ResultPage({ comprehension, formData, tabs, onNewTab, onCloseTab, onAdapt, onRemix, onLoadFromHistory, api }) {
+  const [activeTabIdx, setActiveTabIdx] = useState(0)
   const [showAnswers, setShowAnswers] = useState(false)
   const [activeSidebar, setActiveSidebar] = useState(null)
   const [isEditMode, setIsEditMode] = useState(false)
@@ -168,9 +169,9 @@ export default function ResultPage({ comprehension, formData, tabs, onNewTab, on
         document.execCommand('copy')
         document.body.removeChild(ta)
       }
-      alert('Copied to clipboard!')
+      showToast('Copied to clipboard')
     } catch {
-      alert('Copy failed — please select and copy manually.')
+      showToast('Copy failed — please select and copy manually')
     }
   }
 
@@ -224,7 +225,7 @@ export default function ResultPage({ comprehension, formData, tabs, onNewTab, on
   const handleGoogleDrive = () => alert('Connect Google Drive coming soon!')
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: '#FAF9F7' }}>
+    <div className="flex flex-col" style={{ background: '#FAF9F7', height: 'calc(100vh - var(--header-h))' }}>
 
       {/* Tab bar + Export — matches Screenshot 4 */}
       <div className="bg-white border-b border-gray-200 flex items-center px-4 gap-2" style={{ minHeight: 44 }}>
@@ -233,14 +234,15 @@ export default function ResultPage({ comprehension, formData, tabs, onNewTab, on
             <div
               key={tab.id || idx}
               className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium cursor-pointer border-b-2 transition-all whitespace-nowrap ${
-                idx === 0
+                idx === activeTabIdx
                   ? 'border-orange-500 text-gray-900'
                   : 'border-transparent text-gray-400 hover:text-gray-600'
               }`}
+              onClick={() => setActiveTabIdx(idx)}
             >
               <span className="max-w-[200px] truncate">{tab.label}</span>
               <button
-                onClick={() => onCloseTab(idx)}
+                onClick={e => { e.stopPropagation(); onCloseTab(idx) }}
                 className="text-gray-300 hover:text-gray-500 leading-none"
               >
                 ×
