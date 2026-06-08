@@ -259,38 +259,168 @@ class SaveChatRequest(BaseModel):
 
 # ─── HELPERS ──────────────────────────────────────────
 
+def parse_grade_number(grade_level: str):
+    """Map a free-text grade label to a numeric level.
+    Kindergarten/pre-primary -> 0, Grade 1..12 -> 1..12, College/UG -> 13.
+    Returns None if it cannot be determined."""
+    g = (grade_level or "").lower()
+    if any(x in g for x in ["kindergarten", "pre-primary", "pre primary", "nursery", "kg", "lkg", "ukg", "k-"]):
+        return 0
+    if any(x in g for x in ["college", "university", "undergrad", "graduate", "ug ", "btech", "b.tech"]):
+        return 13
+    m = _re_mod.search(r"\b(?:grade|class|std|standard)\s*([0-9]{1,2})\b", g)
+    if not m:
+        m = _re_mod.search(r"\b([0-9]{1,2})\s*(?:st|nd|rd|th)\b", g)
+    if m:
+        n = int(m.group(1))
+        if 1 <= n <= 12:
+            return n
+    if "high school" in g:
+        return 10
+    if "middle" in g:
+        return 7
+    return None
+
+
+# Per-grade cognitive/intelligence calibration. Each entry tells the model the EXACT
+# age, vocabulary ceiling, sentence length, cognitive (Bloom's) ceiling, reasoning depth,
+# expected answer length, and the kind of examples that fit a student of that grade.
+# This is what makes a Grade 1 output genuinely different from a Grade 10 output.
+_GRADE_INTELLIGENCE = {
+    0:  ("age 4-5 (Kindergarten)", "only spoken sight words a 4-5 year old knows", "3-5 words",
+         "Remember & basic Understand only (name, point, match, count to 20)",
+         "no abstract reasoning; one idea at a time; recognise and repeat",
+         "one word or one short spoken sentence",
+         "toys, animals, food, family, colours, shapes — things a child can touch or see"),
+    1:  ("age 6 (Grade 1)", "basic sight words and CVC words a 6 year old reads", "4-6 words",
+         "Remember & Understand (name, list, match, count, identify)",
+         "single-step reasoning; concrete only; pictures help",
+         "1 short sentence or a single number",
+         "everyday home/classroom objects, counting things, simple picture stories"),
+    2:  ("age 7 (Grade 2)", "simple everyday words a 7 year old reads", "5-8 words",
+         "Remember & Understand, very simple Apply (single-step add/subtract, sort, order)",
+         "one or two concrete steps; no abstraction",
+         "1-2 short sentences",
+         "money, time, simple shopping, family, short stories with a clear moral"),
+    3:  ("age 8 (Grade 3)", "common everyday vocabulary a 8 year old knows", "8-10 words",
+         "Understand & Apply; first simple 'why' questions",
+         "two-step concrete reasoning; cause and effect in plain terms",
+         "2-3 sentences or short working",
+         "real situations: markets, gardens, weather, simple maps, classroom surveys"),
+    4:  ("age 9 (Grade 4)", "elementary vocabulary; define any new term immediately", "10-12 words",
+         "Apply & begin Analyse (compare, group, explain reasons)",
+         "multi-step concrete reasoning; simple patterns and rules",
+         "3-4 sentences or a few lines of working",
+         "daily-life word problems, simple experiments, comparisons, short paragraphs"),
+    5:  ("age 10 (Grade 5)", "elementary vocabulary with a few subject terms (defined)", "10-14 words",
+         "Apply & Analyse; introduce light abstraction",
+         "multi-step reasoning; generalise simple rules; justify briefly",
+         "4-5 sentences or structured working",
+         "real-world projects, data tables, fractions in cooking/money, cause-effect in stories"),
+    6:  ("age 11 (Grade 6)", "middle-school vocabulary; introduce subject terms with brief definitions", "moderate (12-16 words)",
+         "Understand, Apply & Analyse; early abstract reasoning",
+         "multi-step structured reasoning; handle variables and simple models",
+         "5-8 sentences or full step-by-step working",
+         "real scenarios, simple algebra/geometry, science with given data, source-based questions"),
+    7:  ("age 12 (Grade 7)", "middle-school vocabulary; subject terms used with short context", "moderate (12-18 words)",
+         "Apply & Analyse; form simple hypotheses",
+         "multi-step reasoning across 2 ideas; compare and infer",
+         "6-10 sentences or detailed working",
+         "applied problems, experiments, map/source analysis, multi-step word problems"),
+    8:  ("age 13 (Grade 8)", "subject-specific vocabulary used naturally", "varied, can be complex",
+         "Analyse & begin Evaluate; pre-algebra/abstract thinking",
+         "integrate 2-3 concepts; reason about relationships and patterns",
+         "detailed multi-paragraph or full derivations",
+         "case studies, data interpretation, derivations, real-world modelling"),
+    9:  ("age 14 (Grade 9)", "discipline-specific terminology, lightly defined", "complex sentences expected",
+         "Analyse, Evaluate & some Create; formal abstract reasoning",
+         "multi-concept integration; proofs, derivations, justified arguments",
+         "full board-style answers with steps and justification",
+         "board-exam scenarios, derivations, HOTS, critical analysis of texts/data"),
+    10: ("age 15 (Grade 10 — board year)", "discipline-specific terminology used freely", "complex, academic",
+         "Analyse, Evaluate & Create; full higher-order thinking",
+         "rigorous multi-concept integration; complete proofs and critical evaluation",
+         "complete board-quality answers with reasoning and justification",
+         "CBSE board / exemplar-level problems, HOTS, multi-step proofs, source/data analysis"),
+    11: ("age 16 (Grade 11)", "advanced academic and technical terminology", "complex, theoretical",
+         "Evaluate & Create; theoretical depth and synthesis",
+         "abstract, theory-driven reasoning; connect multiple concepts and derive results",
+         "extended analytical answers with rigorous justification",
+         "competitive-exam (JEE/NEET foundation) style, theoretical derivations, research-style questions"),
+    12: ("age 17 (Grade 12)", "advanced academic and technical terminology", "complex, theoretical",
+         "Evaluate & Create; pre-college rigor",
+         "high abstraction; multi-step derivations, critical synthesis, original argument",
+         "extended, rigorous, exam-quality answers",
+         "JEE/NEET/board-advanced problems, in-depth analysis, applied theory"),
+    13: ("undergraduate (College)", "specialised academic and professional terminology", "scholarly",
+         "Evaluate & Create at university level",
+         "independent, research-grade reasoning; critique and construct arguments",
+         "essay/derivation-length scholarly answers",
+         "research-oriented, real-world professional and theoretical problems"),
+}
+
+
 def get_grade_language_profile(grade_level: str) -> str:
-    g = grade_level.lower()
-    if any(x in g for x in ["kindergarten", "grade 1", "grade 2", "1st", "2nd", "k-"]):
-        return (
-            "LANGUAGE LEVEL — CRITICAL: Use extremely simple language. "
-            "Sentences must be 3-6 words maximum. Use only basic sight words a 5-6 year old knows. "
-            "No abstract concepts. Use animals, toys, food, family as examples only. "
-            "Every sentence must be something a Kindergartener can read aloud."
-        )
-    elif any(x in g for x in ["grade 3", "grade 4", "grade 5", "3rd", "4th", "5th"]):
-        return (
-            "LANGUAGE LEVEL: Use simple, clear elementary school language. "
-            "Sentences should be 8-12 words. Use common everyday vocabulary a 9-11 year old knows. "
-            "Include concrete, relatable real-world examples. Avoid jargon. "
-            "If introducing a new word, immediately define it in simple terms."
-        )
-    elif any(x in g for x in ["grade 6", "grade 7", "grade 8", "6th", "7th", "8th", "middle"]):
-        return (
-            "LANGUAGE LEVEL: Use middle school level language appropriate for ages 11-14. "
-            "Moderate sentence complexity is fine. Introduce subject-specific vocabulary "
-            "with brief definitions. Mix concrete examples with some abstract reasoning. "
-            "Students can handle multi-step thinking but need clear structure."
-        )
-    elif any(x in g for x in ["grade 9", "grade 10", "grade 11", "grade 12", "9th", "10th", "11th", "12th", "high school"]):
-        return (
-            "LANGUAGE LEVEL: Use high school academic language for ages 14-18. "
-            "Advanced vocabulary and complex sentence structures are expected. "
-            "Require abstract reasoning, critical analysis, and synthesis. "
-            "Use discipline-specific terminology without over-defining it. "
-            "Challenge students with nuanced questions and multi-layered concepts."
-        )
-    return "LANGUAGE LEVEL: Use clear, age-appropriate language for the specified grade level."
+    """Return a precise cognitive/intelligence calibration block for the given grade.
+    This is what differentiates a Grade 1 output from a Grade 10 output — vocabulary,
+    sentence length, the Bloom's ceiling, reasoning depth, and expected answer length
+    are all pinned to the exact grade so the model never produces above/below-level work."""
+    n = parse_grade_number(grade_level)
+    if n is None:
+        return "GRADE INTELLIGENCE LEVEL: Use clear, age-appropriate language and reasoning depth for the specified grade level."
+    age, vocab, sentence, cognition, reasoning, answer_len, examples = _GRADE_INTELLIGENCE[n]
+    return (
+        f"GRADE INTELLIGENCE LEVEL — CRITICAL, calibrate EVERYTHING to {grade_level} ({age}):\n"
+        f"  • VOCABULARY: use {vocab}. Never use words above this level; if a new term is unavoidable, define it in simpler words.\n"
+        f"  • SENTENCE LENGTH: {sentence}.\n"
+        f"  • COGNITIVE CEILING (Bloom's): {cognition}. Do NOT exceed this — a {grade_level} student cannot handle higher-grade cognition.\n"
+        f"  • REASONING DEPTH: {reasoning}.\n"
+        f"  • EXPECTED ANSWER LENGTH: {answer_len}.\n"
+        f"  • EXAMPLES MUST USE: {examples}.\n"
+        f"  The difficulty, wording, and depth must be UNMISTAKABLY {grade_level} — clearly simpler than the grade above and clearly more advanced than the grade below."
+    )
+
+
+def get_curriculum_guardrails(grade_level: str, subject: str = "", topic: str = "", topic_description: str = "") -> str:
+    """Shared, non-negotiable rules injected into every generation prompt:
+    (1) lock content to the chosen grade's syllabus, (2) forbid repeated/duplicate items,
+    (3) make the model reason about what/how/why before writing. Centralised so every
+    tool (worksheet, lesson plan, question paper, quiz, activities, assessment) behaves the same."""
+    subj = f" ({subject})" if subject else ""
+    block = (
+        "═══ NON-NEGOTIABLE RULES (apply to the ENTIRE output) ═══\n"
+        f"1. SYLLABUS LOCK: Produce content ONLY at the {grade_level} level for '{topic}'{subj}. "
+        f"Stay strictly within what a {grade_level} student studies for this topic in their syllabus. "
+        f"Do NOT borrow concepts, vocabulary, examples, formulae, or sub-topics that belong to a higher OR a lower grade. "
+        f"If something is normally taught in a different class, leave it out.\n"
+        "2. ZERO REPETITION: Every question / item / example MUST be unique. No two items may test the same fact, "
+        "reuse the same numbers or scenario, or be a reworded version of another. Vary the sub-concept, the context, "
+        "the numbers, and the phrasing across all items. Before finalising, re-read everything and replace any "
+        "duplicate or near-duplicate so the same question never appears twice.\n"
+        "3. THINK BEFORE WRITING (silently): For each item first decide WHAT concept it tests, HOW a student of this exact "
+        "grade would solve it, and WHY it belongs in this grade's syllabus — then write a clean, correct item. "
+        "Output ONLY the final content, never your reasoning.\n"
+    )
+    if topic_description:
+        block += f"4. CURRICULUM ANCHOR: Keep every item within this syllabus scope — {topic_description}\n"
+    block += "═════════════════════════════════════════════════════════\n"
+    return block
+
+
+def _dedupe_questions(questions: list) -> list:
+    """Remove exact / near-exact duplicate questions (normalised text match).
+    Guarantees the same question never appears twice in a generated paper/quiz."""
+    seen = set()
+    out = []
+    for q in questions or []:
+        text = (q.get("question") if isinstance(q, dict) else None) or ""
+        key = _re_mod.sub(r"[^a-z0-9]", "", text.lower())
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        out.append(q)
+    return out
 
 
 def call_openai(system_prompt: str, user_prompt: str, max_tokens: int = 4096, temperature: float = 0.5) -> str:
@@ -451,6 +581,8 @@ def generate_worksheet(req: WorksheetRequest):
         "- Use --- for section dividers\n"
     )
 
+    guardrails = get_curriculum_guardrails(req.grade_level, req.subject, req.topic)
+
     user_prompt = (
         f"Create a PRINT-READY worksheet for {req.grade_level} students.\n\n"
         f"TOPIC: {req.topic}\n"
@@ -462,6 +594,7 @@ def generate_worksheet(req: WorksheetRequest):
         f"{word_bank_note}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
         f"{material_note}\n\n"
+        f"{guardrails}\n"
         f"{subject_intelligence}\n"
         "QUESTION QUALITY RULES (CRITICAL):\n"
         "- EVERY question must be a complete, well-formed sentence as it would appear on a printed exam\n"
@@ -652,6 +785,7 @@ def generate_lesson_plan(req: LessonPlanRequest):
         f"{chapter_context}"
         f"{additional_notes_section}"
         f"{lesson_material_note}\n\n"
+        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic)}\n"
 
         "TIME ALLOCATION (use these exact times in section headers; sums to total duration):\n"
         f"{time_table}\n\n"
@@ -892,6 +1026,7 @@ def generate_mc_assessment(req: MCAssessmentRequest):
         f"{'STANDARDS: ' + req.standards if req.standards else ''}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
         f"{mc_material_note}\n"
+        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic)}\n"
         "FORMAT:\n"
         "- Title in ALL CAPS with topic and grade\n"
         "- Name / Date / Score fields\n"
@@ -1092,6 +1227,7 @@ def generate_class_activity(req: ClassActivityRequest):
         f"{'MATERIALS AVAILABLE: ' + req.materials_available if req.materials_available else '(none specified — default to locally available, low-cost everyday materials only)'}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
         f"{material_note}\n\n"
+        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic)}\n"
         f"{subject_activity_hints}\n"
         "ACTIVITY QUALITY RULES (CRITICAL):\n"
         "- Every activity must be SPECIFIC to the topic — not a generic 'discuss in groups' activity\n"
@@ -2053,7 +2189,9 @@ async def generate_quiz(request: QuizRequest):
 {grade_profile}
 {topic_ctx}
 
-Generate exactly {request.num_questions} high-quality questions. Each question must be genuinely about "{request.topic}" in the context of {request.subject} — testing real understanding of the subject matter.
+{get_curriculum_guardrails(request.grade_level, request.subject, request.topic, request.topic_description or "")}
+
+Generate exactly {request.num_questions} high-quality questions. Each question must be genuinely about "{request.topic}" in the context of {request.subject} — testing real understanding of the subject matter. Every one of the {request.num_questions} questions must be DISTINCT — no repeated or reworded questions, and no two questions sharing the same numbers or scenario.
 
 {quality_checks}
 
@@ -2147,9 +2285,10 @@ Rules:
 
         data = _repair_json(text)
 
-        # Ensure every question has required fields
+        # Drop any duplicate questions, then ensure every question has required fields.
+        data["questions"] = _dedupe_questions(data.get("questions", []))
         for i, q in enumerate(data.get("questions", [])):
-            q.setdefault("id", i + 1)
+            q["id"] = i + 1
             q.setdefault("type", "mcq" if q.get("options") else "subjective")
             q.setdefault("marks", 1 if q.get("type") == "mcq" else 2)
             q.setdefault("correct", "")
@@ -2174,8 +2313,9 @@ Rules:
             text2 = _re.sub(r'^```[a-z]*\s*', '', text2)
             text2 = _re.sub(r'\s*```$', '', text2).strip()
             data = _repair_json(text2)
+            data["questions"] = _dedupe_questions(data.get("questions", []))
             for i, q in enumerate(data.get("questions", [])):
-                q.setdefault("id", i + 1)
+                q["id"] = i + 1
                 q.setdefault("type", "mcq" if q.get("options") else "subjective")
                 q.setdefault("marks", 1 if q.get("type") == "mcq" else 2)
                 q.setdefault("correct", "")

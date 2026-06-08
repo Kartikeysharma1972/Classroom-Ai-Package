@@ -1,5 +1,5 @@
 import React from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 
 const navGroups = [
   {
@@ -124,6 +124,11 @@ const navGroups = [
 ]
 
 export default function Sidebar() {
+  const navigate = useNavigate()
+  const goToPricing = () => {
+    navigate('/landing')
+    setTimeout(() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' }), 100)
+  }
   return (
     <aside style={{
       position: 'fixed', top: 0, left: 0,
@@ -288,6 +293,7 @@ export default function Sidebar() {
             letterSpacing: '-0.1px', position: 'relative',
             transition: 'transform 0.15s',
           }}
+          onClick={goToPricing}
           onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.03)'}
           onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
           >Upgrade Now</button>

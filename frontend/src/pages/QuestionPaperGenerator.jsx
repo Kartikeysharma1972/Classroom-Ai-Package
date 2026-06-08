@@ -368,7 +368,7 @@ export default function QuestionPaperGenerator() {
               <SelectDown
                 value={topicList.some(t => (typeof t === 'string' ? t : (t.label || t.topic)) === topic) ? topic : ''}
                 onChange={setTopic}
-                options={topicList.map(t => typeof t === 'string' ? t : { value: t.label || t.topic, label: t.label || t.topic })}
+                options={topicList.map(t => typeof t === 'string' ? t : { value: t.label || t.topic, label: (t.chapter ? `${t.chapter} — ` : '') + (t.label || t.topic) })}
                 placeholder="Select topic"
               />
             )}
