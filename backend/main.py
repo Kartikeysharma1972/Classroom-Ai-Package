@@ -164,6 +164,8 @@ class WorksheetRequest(BaseModel):
     include_word_bank: bool = False
     additional_instructions: str = ""
     source_material: str = ""
+    topic_description: str = ""
+    topic_track: str = "core"
 
 class LessonPlanRequest(BaseModel):
     topic: str
@@ -381,28 +383,44 @@ def get_grade_language_profile(grade_level: str) -> str:
     )
 
 
-def get_curriculum_guardrails(grade_level: str, subject: str = "", topic: str = "", topic_description: str = "") -> str:
+def get_curriculum_guardrails(grade_level: str, subject: str = "", topic: str = "",
+                              topic_description: str = "", strict_syllabus: bool = True) -> str:
     """Shared, non-negotiable rules injected into every generation prompt:
-    (1) lock content to the chosen grade's syllabus, (2) forbid repeated/duplicate items,
+    (1) lock content to the chosen grade's level, (2) forbid repeated/duplicate items,
     (3) make the model reason about what/how/why before writing. Centralised so every
-    tool (worksheet, lesson plan, question paper, quiz, activities, assessment) behaves the same."""
+    tool (worksheet, lesson plan, question paper, quiz, activities, assessment) behaves the same.
+
+    strict_syllabus=True (CBSE/NCERT core track): stay strictly inside the grade's textbook syllabus.
+    strict_syllabus=False (Miscellaneous / Advanced track): may go beyond the textbook for enrichment,
+    but difficulty and cognition MUST stay calibrated to the chosen grade (never higher/lower)."""
     subj = f" ({subject})" if subject else ""
+    if strict_syllabus:
+        rule1 = (
+            f"1. SYLLABUS LOCK: Produce content ONLY at the {grade_level} level for '{topic}'{subj}. "
+            f"Stay strictly within what a {grade_level} student studies for this topic in their syllabus. "
+            f"Do NOT borrow concepts, vocabulary, examples, formulae, or sub-topics that belong to a higher OR a lower grade. "
+            f"If something is normally taught in a different class, leave it out.\n"
+        )
+    else:
+        rule1 = (
+            f"1. GRADE-LEVEL LOCK: Content is for '{topic}'{subj} at the {grade_level} level. "
+            f"You MAY go beyond the standard textbook for enrichment, BUT the difficulty, vocabulary, and reasoning "
+            f"demand MUST stay calibrated to a {grade_level} student — never use the complexity or techniques of a "
+            f"higher or lower grade. Keep it challenging-but-reachable for this exact grade.\n"
+        )
     block = (
         "═══ NON-NEGOTIABLE RULES (apply to the ENTIRE output) ═══\n"
-        f"1. SYLLABUS LOCK: Produce content ONLY at the {grade_level} level for '{topic}'{subj}. "
-        f"Stay strictly within what a {grade_level} student studies for this topic in their syllabus. "
-        f"Do NOT borrow concepts, vocabulary, examples, formulae, or sub-topics that belong to a higher OR a lower grade. "
-        f"If something is normally taught in a different class, leave it out.\n"
+        + rule1 +
         "2. ZERO REPETITION: Every question / item / example MUST be unique. No two items may test the same fact, "
         "reuse the same numbers or scenario, or be a reworded version of another. Vary the sub-concept, the context, "
         "the numbers, and the phrasing across all items. Before finalising, re-read everything and replace any "
         "duplicate or near-duplicate so the same question never appears twice.\n"
         "3. THINK BEFORE WRITING (silently): For each item first decide WHAT concept it tests, HOW a student of this exact "
-        "grade would solve it, and WHY it belongs in this grade's syllabus — then write a clean, correct item. "
+        "grade would solve it, and WHY it suits this grade — then write a clean, correct item. "
         "Output ONLY the final content, never your reasoning.\n"
     )
     if topic_description:
-        block += f"4. CURRICULUM ANCHOR: Keep every item within this syllabus scope — {topic_description}\n"
+        block += f"4. CURRICULUM ANCHOR: Keep every item aligned to this scope — {topic_description}\n"
     block += "═════════════════════════════════════════════════════════\n"
     return block
 
@@ -581,7 +599,7 @@ def generate_worksheet(req: WorksheetRequest):
         "- Use --- for section dividers\n"
     )
 
-    guardrails = get_curriculum_guardrails(req.grade_level, req.subject, req.topic)
+    guardrails = get_curriculum_guardrails(req.grade_level, req.subject, req.topic, req.topic_description or "", strict_syllabus=(req.topic_track == "core"))
 
     user_prompt = (
         f"Create a PRINT-READY worksheet for {req.grade_level} students.\n\n"
@@ -785,7 +803,7 @@ def generate_lesson_plan(req: LessonPlanRequest):
         f"{chapter_context}"
         f"{additional_notes_section}"
         f"{lesson_material_note}\n\n"
-        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic)}\n"
+        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic, req.topic_description or '', strict_syllabus=(req.topic_track == 'core'))}\n"
 
         "TIME ALLOCATION (use these exact times in section headers; sums to total duration):\n"
         f"{time_table}\n\n"
@@ -1227,7 +1245,7 @@ def generate_class_activity(req: ClassActivityRequest):
         f"{'MATERIALS AVAILABLE: ' + req.materials_available if req.materials_available else '(none specified — default to locally available, low-cost everyday materials only)'}\n"
         f"{'ADDITIONAL INSTRUCTIONS: ' + req.additional_instructions if req.additional_instructions else ''}\n"
         f"{material_note}\n\n"
-        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic)}\n"
+        f"{get_curriculum_guardrails(req.grade_level, req.subject, req.topic, req.topic_description or '', strict_syllabus=(req.topic_track == 'core'))}\n"
         f"{subject_activity_hints}\n"
         "ACTIVITY QUALITY RULES (CRITICAL):\n"
         "- Every activity must be SPECIFIC to the topic — not a generic 'discuss in groups' activity\n"
@@ -2189,7 +2207,7 @@ async def generate_quiz(request: QuizRequest):
 {grade_profile}
 {topic_ctx}
 
-{get_curriculum_guardrails(request.grade_level, request.subject, request.topic, request.topic_description or "")}
+{get_curriculum_guardrails(request.grade_level, request.subject, request.topic, request.topic_description or "", strict_syllabus=(request.question_category == "ncert" and request.topic_track == "core"))}
 
 Generate exactly {request.num_questions} high-quality questions. Each question must be genuinely about "{request.topic}" in the context of {request.subject} — testing real understanding of the subject matter. Every one of the {request.num_questions} questions must be DISTINCT — no repeated or reworded questions, and no two questions sharing the same numbers or scenario.
 
